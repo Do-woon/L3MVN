@@ -1,0 +1,51 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Git metadata
+.git/
+.gitignore
+.gitattributes
+
+# Large runtime data (mounted from host, not baked into image)
+data/
+datasets/
+pretrained_models/
+outputs/
+tmp/
+dump/
+
+# Logs
+*.log
+logs/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Docker files not needed in build context
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Optional docs (keep commented unless you want a smaller context)
+# *.md
+# docs/

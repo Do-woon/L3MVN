@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  l3mvn:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+
+    image: wcr.baemin.in/sandbox/rlab/l3mvn_igibson:latest
+    container_name: l3mvn_dev
+
+    runtime: nvidia
+
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+      - IGIBSON_RENDERING_BACKEND=egl
+      - PYTHONPATH=/mount/nas2/users/dukim/vla_ws/L3MVN
+
+    volumes:
+      - /mount/nas2:/mount/nas2
+      - /mount/nas3:/mount/nas3
+
+      # Persist iGibson user config across container restarts.
+      - igibson_config:/root/.igibson
+
+    working_dir: /mount/nas2/users/dukim/vla_ws/L3MVN
+
+    stdin_open: true
+    tty: true
+
+    network_mode: bridge
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  igibson_config:
+    driver: local
