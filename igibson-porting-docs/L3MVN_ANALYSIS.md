@@ -112,6 +112,8 @@ main_llm_zeroshot.py에서 infos에서 직접 참조하는 **모든** 키:
 > iGibson 이식 시 핵심:
 > - infos['sensor_pose']는 "world pose"가 아니라 "상대 delta pose"로 제공해야 함.
 > - dx/dy/do는 **각 step의 macro-action 실행 결과**로 계산해야 L3MVN mapper가 정상 동작.
+> - macro-action 구현 방식은 자유이며, v1에서는 base pose teleport + collision check 방식도 허용된다.
+>   (중요한 것은 저수준 제어 방식이 아니라, 최종 실행 결과 delta와 충돌 처리 일관성이다.)
 > - **eve_angle**은 카메라 elevation 상태로, Look Up/Down 액션(4,5)과 연동됨.
 >   iGibson adapter에서 내부 상태로 관리하고 infos에 매 step 반영해야 함.
 > - **clear_flag**는 plan_act_and_preprocess 내부에서 설정되므로, adapter의
@@ -241,3 +243,8 @@ increase_local_map, local_map, local_map_stair, local_pose = \
   (semantic_id 이미지 dtype, id namespace, category name source)
   를 실제 iGibson에서 확인하거나 공식 문서를 기준으로 확정해야 함.
 → **IGIBSON_ANALYSIS.md에서 해결됨** (Section 10-14)
+
+## 7. 기타 note
+
+- Look Up/Down은 Sem_Exp_Env_Agent._plan()이 실제로 반환하는 유효 action이며, L3MVN의 sem_exp 실행 계약은 사실상 discrete(6)이다.
+- objectgoal_env.py의 Discrete(3)/주석은 현재 sem_exp 실행 경로의 기준이 아니므로, 포팅 시 action contract 근거로 사용하지 않는다.

@@ -260,17 +260,20 @@ infos_list 각 원소가 반드시 포함해야 하는 키:
 | **4** | **LOOK_UP** | **카메라 elevation +30도** (eve_angle += 30) |
 | **5** | **LOOK_DOWN** | **카메라 elevation -30도** (eve_angle -= 30) |
 
+
+
 - parameter:
   - forward_step_m (예: 0.25m)
   - turn_angle_deg (예: 30deg, arguments.py:81 기본값)
   - eve_angle_step_deg: 30deg (elevation 변경 단위, agents/sem_exp.py:326-329)
   - eve_angle 범위: 0 ~ -60 (최소 -60도까지 내려봄, agents/sem_exp.py:324)
 - 출력:
-  - iGibson 제어 입력(연속/속도 제어 등)을 사용해 해당 macro를 실행하고,
+  - 구현 방식은 강제하지 않는다 (low-level wheel/joint 제어 필수 아님).
+  - v1 권장: base pose teleport + collision check 방식으로 macro action을 실행하고,
   - 실제 실행 후 pose delta를 infos['sensor_pose']에 기록
   - elevation 변경 시 infos['eve_angle']을 업데이트
 
-> **주의**: Look Up/Down (4,5)은 로봇 이동이 아니라 카메라 tilt 변경이므로,
+> **주의**: Look Up/Down (4,5)은 로봇 base 이동이 아니라 카메라 tilt 변경이므로,
 > sensor_pose delta는 [0, 0, 0]이 되어야 하고, eve_angle만 변경해야 한다.
 > 현재 코드에서 eve_angle은 env 내부 상태로 관리됨 (agents/sem_exp.py:107-108).
 
@@ -285,7 +288,7 @@ infos_list 각 원소가 반드시 포함해야 하는 키:
 | Semantic GT | int id map (1..16), 16ch one-hot | uint32 id map + mapping dict | id space mismatch | SemanticTaxonomy |
 | Pose (sensor_pose) | [dx,dy,do] delta (meters, radians) | base pose + camera extrinsic | frame/delta 변환 | ObsAdapter (pose) |
 | Pose (eve_angle) | elevation angle (0/-30/-60) | camera tilt state | elevation 상태 관리 | DiscreteActionExecutor |
-| Action | **discrete(6)**: Stop/Fwd/Left/Right/**LookUp/LookDown** | continuous base ctrl | macro execution 필요 | DiscreteActionExecutor |
+| Action | **discrete(6)**: Stop/Fwd/Left/Right/**LookUp/LookDown** | pose teleport + collision check (or equivalent) | macro execution 필요 | DiscreteActionExecutor |
 | infos keys | sensor_pose, eve_angle, goal_cat_id, goal_name, clear_flag, metrics | N/A | 전부 생성 필요 | EnvWrapper |
 | planner_inputs | dict 8 keys (Section 2 참조) | N/A | define contract | EnvWrapper |
 
