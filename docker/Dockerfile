@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim \
     tmux \
     htop \
+    x11-apps \
+    mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
