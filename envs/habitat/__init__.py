@@ -3,13 +3,28 @@
 import os
 import numpy as np
 import torch
-from habitat.config.default import get_config as cfg_env
-from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
-from habitat import Config, Env, RLEnv, VectorEnv, make_dataset
+
+try:
+    from habitat.config.default import get_config as cfg_env
+    from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
+    from habitat import Config, Env, RLEnv, VectorEnv, make_dataset
+except ImportError:
+    cfg_env = None
+    PointNavDatasetV1 = None
+    Config = None
+    Env = None
+    RLEnv = None
+    VectorEnv = None
+    make_dataset = None
 
 from agents.sem_exp import Sem_Exp_Env_Agent
-from .objectgoal_env import ObjectGoal_Env
-from .objectgoal_env21 import ObjectGoal_Env21
+
+try:
+    from .objectgoal_env import ObjectGoal_Env
+    from .objectgoal_env21 import ObjectGoal_Env21
+except ImportError:
+    ObjectGoal_Env = None
+    ObjectGoal_Env21 = None
 
 from .utils.vector_env import VectorEnv
 

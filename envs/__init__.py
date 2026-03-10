@@ -1,6 +1,10 @@
 import torch
 
-from .habitat import construct_envs, construct_envs21
+try:
+    from .habitat import construct_envs, construct_envs21
+except ImportError:
+    construct_envs = None
+    construct_envs21 = None
 
 
 def make_vec_envs(args):
