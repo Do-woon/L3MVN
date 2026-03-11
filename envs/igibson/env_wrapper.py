@@ -164,6 +164,7 @@ class EnvWrapper:
             "goal_cat_id": self._goal_cat_id,
             "goal_name": self._goal_name,
             "clear_flag": self._clear_flag,
+            "last_action": None,
         }
         return obs, info
 
@@ -228,6 +229,7 @@ class EnvWrapper:
 
         collision_int = int(collision)
         fail_case = self._new_fail_case(collision_int)
+        self._last_action = action
         info = self._build_info(sensor_pose=sensor_pose, collision_int=collision_int)
 
         if self._done:
@@ -235,7 +237,6 @@ class EnvWrapper:
             info["success"] = int(goal_reached)
             info["distance_to_goal"] = 0.0
 
-        self._last_action = action
         return obs, fail_case, self._done, info
 
     # ------------------------------------------------------------------
@@ -304,6 +305,7 @@ class EnvWrapper:
             "goal_name": self._goal_name,
             "clear_flag": self._clear_flag,
             "collision": int(collision_int),
+            "last_action": self._last_action,
         }
 
     def close(self) -> None:

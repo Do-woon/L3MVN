@@ -57,6 +57,12 @@ def get_args():
                                 (default: 0)""")
     parser.add_argument('--print_images', type=int, default=0,
                         help='1: save visualization as images')
+    parser.add_argument('--debug_viz', type=int, default=0,
+                        help='1: save zeroshot loop debug visualizations')
+    parser.add_argument('--debug_viz_dir', type=str, default='./tmp/debug_viz',
+                        help='directory to save debug visualization outputs')
+    parser.add_argument('--debug_viz_every', type=int, default=1,
+                        help='save debug visualization every N env steps')
 
     # Environment, dataset and episode specifications
     parser.add_argument('-efw', '--env_frame_width', type=int, default=640,

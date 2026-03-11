@@ -125,6 +125,7 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
         self.eve_angle_old = 0
 
         info['eve_angle'] = self.eve_angle
+        info['last_action'] = None
 
 
         if args.visualize or args.print_images:
@@ -158,6 +159,7 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
         if planner_inputs["wait"]:
             self.last_action = None
             self.info["sensor_pose"] = [0., 0., 0.]
+            self.info["last_action"] = None
             return np.zeros(self.obs.shape), self.fail_case, False, self.info
 
         # Reset reward if new long-term goal
@@ -206,6 +208,7 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
             self.obs = obs
             self.info = info
             info['eve_angle'] = self.eve_angle
+            info['last_action'] = self.last_action
 
 
             # e_time = time.time()
@@ -219,6 +222,7 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
         else:
             self.last_action = None
             self.info["sensor_pose"] = [0., 0., 0.]
+            self.info["last_action"] = None
             return np.zeros(self.obs_shape), self.fail_case, False, self.info
 
     def _plan(self, planner_inputs):
@@ -567,4 +571,3 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
                 dump_dir, self.rank, self.episode_no,
                 self.rank, self.episode_no, self.timestep)
             cv2.imwrite(fn, self.vis_image)
-

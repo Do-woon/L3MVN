@@ -35,6 +35,7 @@ from model import Semantic_Mapping, FeedforwardNet
 from envs.utils.fmm_planner import FMMPlanner
 from envs import make_vec_envs
 from arguments import get_args
+from utils.debug_viz import DebugVizDumper
 
 from constants import category_to_id, hm3d_category, category_to_id_gibson
 
@@ -168,6 +169,13 @@ def main():
 
     g_masks = torch.ones(num_scenes).float().to(device)
     step_masks = torch.zeros(num_scenes).float().to(device)
+    debug_viz = DebugVizDumper.from_args(args)
+    if debug_viz.enabled:
+        print(
+            "[DEBUG-VIZ] enabled: dir={}, every={}".format(
+                debug_viz.out_dir, debug_viz.every
+            )
+        )
 
     if args.eval:
         episode_success = []
@@ -580,7 +588,18 @@ def main():
     sem_map_module.eval()
 
 
+    raw_obs_batch = _to_numpy_obs(obs).astype(np.float32, copy=False)
     obs_for_map = _maybe_preprocess_obs_batch(args, obs, infos, preprocess_single)
+    pre_obs_batch = _to_numpy_obs(obs_for_map).astype(np.float32, copy=False)
+    if debug_viz.should_dump(0):
+        for e in range(num_scenes):
+            debug_viz.dump_obs(
+                step=0,
+                env_idx=e,
+                raw_obs_chw=raw_obs_batch[e],
+                pre_obs_chw=pre_obs_batch[e],
+                tag="init",
+            )
     obs = _obs_batch_to_torch(obs_for_map, device)
 
     # Predict semantic map from frame 1
@@ -627,8 +646,32 @@ def main():
             local_map[e, -1, :, :] = 1e-5
             p_input['sem_map_pred'] = local_map[e, 4:, :, :
                                                 ].argmax(0).cpu().numpy()
+        if debug_viz.should_dump(0):
+            debug_viz.dump_maps(
+                step=0,
+                env_idx=e,
+                local_map_chw=local_map[e],
+                full_map_chw=full_map[e],
+                planner_input=p_input,
+                target_edge_map=target_edge_map[e],
+                target_point_map=target_point_map[e],
+                local_goal_map=goal_maps[e],
+                goal_cat_channel=int(infos[e]["goal_cat_id"]) + 4,
+            )
 
     obs, fail_case, done, infos = envs.plan_act_and_preprocess(planner_inputs)
+    if debug_viz.should_dump(0):
+        for e in range(num_scenes):
+            fail_case_e = fail_case[e] if isinstance(fail_case, (list, tuple, np.ndarray)) else fail_case
+            debug_viz.dump_meta(
+                step=0,
+                env_idx=e,
+                planner_input=planner_inputs[e],
+                done=bool(done[e]),
+                fail_case=fail_case_e,
+                info=infos[e],
+                selected_frontier_id=None,
+            )
 
     start = time.time()
     g_reward = 0
@@ -670,7 +713,19 @@ def main():
 
         # ------------------------------------------------------------------
         # Semantic Mapping Module
+        raw_obs_batch = _to_numpy_obs(obs).astype(np.float32, copy=False)
         obs_for_map = _maybe_preprocess_obs_batch(args, obs, infos, preprocess_single)
+        pre_obs_batch = _to_numpy_obs(obs_for_map).astype(np.float32, copy=False)
+        viz_step = int(step) + 1
+        if debug_viz.should_dump(viz_step):
+            for e in range(num_scenes):
+                debug_viz.dump_obs(
+                    step=viz_step,
+                    env_idx=e,
+                    raw_obs_chw=raw_obs_batch[e],
+                    pre_obs_chw=pre_obs_batch[e],
+                    tag="loop",
+                )
         obs = _obs_batch_to_torch(obs_for_map, device)
 
         poses = torch.from_numpy(np.asarray(
@@ -690,6 +745,7 @@ def main():
         locs = local_pose.cpu().numpy()
         planner_pose_inputs[:, :3] = locs + origins
         local_map[:, 2, :, :].fill_(0.)  # Resetting current location channel
+        selected_frontier_ids = [-1 for _ in range(num_scenes)]
         for e in range(num_scenes):
             r, c = locs[e, 1], locs[e, 0]
             loc_r, loc_c = [int(r * 100.0 / args.map_resolution),
@@ -886,6 +942,7 @@ def main():
                 else:
                     global_item = 0
                 #------------------------------------------------------------------
+                selected_frontier_ids[e] = int(global_item)
 
                 ###### Get llm frontier reward
                 # ------------------------------------------------------------------
@@ -937,8 +994,32 @@ def main():
                 local_map[e, -1, :, :] = 1e-5
                 p_input['sem_map_pred'] = local_map[e, 4:, :,
                                                 :].argmax(0).cpu().numpy()
+            if debug_viz.should_dump(viz_step):
+                debug_viz.dump_maps(
+                    step=viz_step,
+                    env_idx=e,
+                    local_map_chw=local_map[e],
+                    full_map_chw=full_map[e],
+                    planner_input=p_input,
+                    target_edge_map=target_edge_map[e],
+                    target_point_map=target_point_map[e],
+                    local_goal_map=local_goal_maps[e],
+                    goal_cat_channel=int(infos[e]["goal_cat_id"]) + 4,
+                )
 
         obs, fail_case, done, infos = envs.plan_act_and_preprocess(planner_inputs)
+        if debug_viz.should_dump(viz_step):
+            for e in range(num_scenes):
+                fail_case_e = fail_case[e] if isinstance(fail_case, (list, tuple, np.ndarray)) else fail_case
+                debug_viz.dump_meta(
+                    step=viz_step,
+                    env_idx=e,
+                    planner_input=planner_inputs[e],
+                    done=bool(done[e]),
+                    fail_case=fail_case_e,
+                    info=infos[e],
+                    selected_frontier_id=selected_frontier_ids[e],
+                )
         # ------------------------------------------------------------------
 
         # ------------------------------------------------------------------
