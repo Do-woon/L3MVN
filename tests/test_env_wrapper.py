@@ -136,7 +136,7 @@ class TestResetHappyPath:
     def test_obs_shape(self):
         w = _build_wrapper()
         obs, info = w.reset()
-        assert obs.shape == (20, H, W)
+        assert obs.shape == (5, H, W)
 
     def test_obs_dtype(self):
         w = _build_wrapper()
@@ -175,7 +175,7 @@ class TestForwardStep:
         w = _build_wrapper()
         w.reset()
         obs, fail_case, done, info = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
-        assert obs.shape == (20, H, W)
+        assert obs.shape == (5, H, W)
 
     def test_fail_case_keys(self):
         w = _build_wrapper()
@@ -254,24 +254,27 @@ class TestLookUpRecovery:
 
 
 # =========================================================================
-# Test 6: semantic block shape & one-hot integrity
+# Test 6: Stage 1 channel content
 # =========================================================================
 
 class TestSemanticBlock:
-    def test_semantic_channels_shape(self):
+    def test_ch4_is_semantic_id_nonnegative(self):
+        """ch4 must contain non-negative float32 semantic IDs."""
         w = _build_wrapper()
         obs, _ = w.reset()
-        sem_block = obs[4:20]
-        assert sem_block.shape == (16, H, W)
+        sem_ch = obs[4]
+        assert sem_ch.shape == (H, W)
+        assert obs.dtype == np.float32
+        assert np.all(sem_ch >= 0)
 
-    def test_one_hot_sum_is_one(self):
+    def test_ch3_depth_nonnegative(self):
+        """ch3 must be a non-negative float32 depth map."""
         w = _build_wrapper()
         obs, _ = w.reset()
-        sem_block = obs[4:20]
-        channel_sums = sem_block.sum(axis=0)
-        np.testing.assert_array_equal(
-            channel_sums, np.ones((H, W), dtype=np.float32)
-        )
+        depth_ch = obs[3]
+        assert depth_ch.shape == (H, W)
+        assert depth_ch.dtype == np.float32
+        assert np.all(depth_ch >= 0)
 
 
 # =========================================================================
@@ -350,32 +353,32 @@ class TestCheckDone:
 
 
 # =========================================================================
-# Test 10: _preprocess_depth_for_l3mvn converts m → cm
+# Test 10: Stage 1 depth and semantic ID channels
 # =========================================================================
 
 class TestPreprocessDepth:
-    def test_metres_to_centimetres(self):
-        w = _build_wrapper()
-        depth_m = np.ones((4, 5), dtype=np.float32) * 2.5  # 2.5 m
-        depth_cm = w._preprocess_depth_for_l3mvn(depth_m)
-        np.testing.assert_allclose(depth_cm, 250.0)
-        assert depth_cm.dtype == np.float32
-
-    def test_squeeze_hw1(self):
-        w = _build_wrapper()
-        depth_m = np.ones((4, 5, 1), dtype=np.float32)
-        depth_cm = w._preprocess_depth_for_l3mvn(depth_m)
-        assert depth_cm.shape == (4, 5)
-
-    def test_depth_in_stage2_obs_is_cm(self):
-        """ch 3 of the (20,H,W) obs must contain depth in cm, not raw metres."""
+    def test_ch3_depth_from_vision_sensor(self):
+        """ch3 depth values come from VisionSensor (metres, [0, depth_high])."""
         w = _build_wrapper()
         obs, _ = w.reset()
-        raw_depth_m = _make_depth()  # our mock depth values
-        # VisionSensor clips [depth_low, depth_high], normalises by depth_high,
-        # then EnvWrapper un-normalises back to metres and converts to cm.
-        # Check that the output is not identical to the raw metres.
-        # Exact values depend on VisionSensor clipping, but ch3 should be cm scale.
+        depth_ch = obs[3]
+        assert depth_ch.shape == (H, W)
+        assert depth_ch.dtype == np.float32
+        # VisionSensor depth_high=5.0, so un-normalised depth <= 5.0 m
+        assert depth_ch.max() <= 5.1  # small tolerance for float precision
+
+    def test_ch4_semantic_id_is_integer_valued(self):
+        """ch4 values are float32 representations of integer semantic IDs."""
+        w = _build_wrapper()
+        obs, _ = w.reset()
+        sem_ch = obs[4]
+        # All values should be integer-valued (fractional part == 0)
+        np.testing.assert_array_equal(sem_ch, np.round(sem_ch))
+
+    def test_step_obs_also_stage1(self):
+        """plan_act_and_preprocess also returns (5,H,W) Stage-1 obs."""
+        w = _build_wrapper()
+        w.reset()
+        obs, _, _, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        assert obs.shape == (5, H, W)
         assert obs.dtype == np.float32
-        # At minimum, verify it's not all zeros (mock depth has nonzero values)
-        assert obs[3].max() > 0.0 or np.all(raw_depth_m == 0.0)

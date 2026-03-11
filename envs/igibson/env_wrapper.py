@@ -1,16 +1,15 @@
 """EnvWrapper: wraps an iGibson environment to satisfy the L3MVN single-env
 contract (obs, info, fail_case, done).
 
-Output obs is **Stage 2**: shape ``(20, H, W)``
-  channels 0-2  : RGB (float32, raw values)
-  channel  3    : Depth (float32, cm, preprocessed)
-  channels 4-19 : Semantic one-hot (16 ch, uint8→float32)
+Output obs is **Stage 1**: shape ``(5, H, W)``
+  channels 0-2 : RGB (float32, raw values)
+  channel  3   : Depth (float32, raw from VisionSensor, metres)
+  channel  4   : Semantic ID (float32, raw GT integer id)
 
 Dependencies
 ------------
 - ``DiscreteActionExecutor`` — action execution + sensor_pose / collision
 - ``ObsAdapter``             — Stage-1 raw obs ``(5, H, W)``
-- ``SemanticTaxonomy``       — semantic id → 16-ch one-hot
 - ``VisionSensor``           — iGibson official sensor pipeline
 """
 
@@ -31,10 +30,6 @@ from envs.igibson.discrete_action_executor import (
 from envs.igibson.obs_adapter import ObsAdapter
 from envs.igibson.semantic_taxonomy import SemanticTaxonomy
 
-# Metres → centimetres conversion factor
-_M_TO_CM = 100.0
-
-
 class _SimAsEnv:
     """Lightweight shim so VisionSensor sees `env.config` and `env.simulator`."""
 
@@ -44,7 +39,7 @@ class _SimAsEnv:
 
 
 class EnvWrapper:
-    """Single-env wrapper that produces L3MVN-compatible Stage-2 obs.
+    """Single-env wrapper that produces L3MVN-compatible Stage-1 obs.
 
     Parameters
     ----------
@@ -103,11 +98,11 @@ class EnvWrapper:
     # ------------------------------------------------------------------
 
     def reset(self) -> tuple[np.ndarray, dict]:
-        """Reset the environment and return (obs_20ch, info).
+        """Reset the environment and return (obs, info).
 
         Returns
         -------
-        obs : np.ndarray, shape (20, H, W), dtype float32
+        obs : np.ndarray, shape (5, H, W), dtype float32
         info : dict
         """
         self._executor.reset()
@@ -116,7 +111,7 @@ class EnvWrapper:
         self._step_count = 0
 
         rgb, depth, semantic = self._get_sensors()
-        obs_20 = self._build_stage2_obs(rgb, depth, semantic)
+        obs = self._obs_adapter.adapt(rgb, depth, semantic)
 
         info = {
             "sensor_pose": [0.0, 0.0, 0.0],
@@ -125,12 +120,12 @@ class EnvWrapper:
             "goal_name": self._goal_name,
             "clear_flag": self._clear_flag,
         }
-        return obs_20, info
+        return obs, info
 
     def plan_act_and_preprocess(
         self, planner_inputs: dict
     ) -> tuple[np.ndarray, dict, bool, dict]:
-        """Execute one action and return (obs_20ch, fail_case, done, info).
+        """Execute one action and return (obs, fail_case, done, info).
 
         Parameters
         ----------
@@ -139,7 +134,7 @@ class EnvWrapper:
 
         Returns
         -------
-        obs : np.ndarray, shape (20, H, W), dtype float32
+        obs : np.ndarray, shape (5, H, W), dtype float32
         fail_case : dict
         done : bool
         info : dict
@@ -153,7 +148,7 @@ class EnvWrapper:
         self._step_count += 1
 
         rgb, depth, semantic = self._get_sensors()
-        obs_20 = self._build_stage2_obs(rgb, depth, semantic)
+        obs = self._obs_adapter.adapt(rgb, depth, semantic)
 
         goal_reached = self._check_goal_reached(
             semantic, self._goal_cat_id, self._goal_name
@@ -182,7 +177,7 @@ class EnvWrapper:
             info["success"] = 0
             info["distance_to_goal"] = 0.0
 
-        return obs_20, fail_case, self._done, info
+        return obs, fail_case, self._done, info
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -224,51 +219,6 @@ class EnvWrapper:
         semantic = obs["seg"][:, :, 0].astype(np.int32)
 
         return rgb, depth, semantic
-
-    def _build_stage2_obs(
-        self,
-        rgb: np.ndarray,
-        depth: np.ndarray,
-        semantic: np.ndarray,
-    ) -> np.ndarray:
-        """Build ``(20, H, W)`` Stage-2 obs from raw sensor arrays.
-
-        Stage 1: ObsAdapter → ``(5, H, W)``
-        Stage 2: replace semantic-id channel with 16-ch one-hot;
-                 apply depth preprocessing to ch 3.
-        """
-        raw = self._obs_adapter.adapt(rgb, depth, semantic)  # (5, H, W) float32
-
-        # Preprocess depth from raw metres → cm for ch 3.
-        depth_cm = self._preprocess_depth_for_l3mvn(raw[3])  # (H, W) float32
-
-        # Semantic one-hot: (16, H, W) uint8
-        sem_one_hot = self._taxonomy.semantic_id_map_to_one_hot(
-            semantic, self._class_id_to_name
-        )
-
-        # Assemble: RGB(3) + Depth(1) + Semantic(16) = 20
-        obs_20 = np.concatenate(
-            [raw[:3], depth_cm[np.newaxis], sem_one_hot.astype(np.float32)],
-            axis=0,
-        )  # (20, H, W)
-        return obs_20
-
-    def _preprocess_depth_for_l3mvn(
-        self, depth: np.ndarray
-    ) -> np.ndarray:
-        """Convert raw-metres depth to centimetres (L3MVN convention).
-
-        Parameters
-        ----------
-        depth : (H, W) or (H, W, 1) float, metres
-
-        Returns
-        -------
-        (H, W) float32, centimetres
-        """
-        d = depth.squeeze() if depth.ndim == 3 else depth
-        return (d * _M_TO_CM).astype(np.float32)
 
     def _check_goal_reached(
         self,

@@ -78,22 +78,22 @@ SIM_STEPS_PER_ACTION = 5
 # ---------------------------------------------------------------------------
 
 def summarize_observation(obs: np.ndarray) -> str:
-    """Return a one-line diagnostic string for an (20, H, W) obs tensor."""
+    """Return a one-line diagnostic string for a (5, H, W) Stage-1 obs tensor."""
     rgb = obs[:3]
     depth = obs[3]
-    sem = obs[4:20]
+    sem_id = obs[4]
     return (
         f"rgb=[{rgb.min():.1f},{rgb.max():.1f},var={rgb.var():.1f}] "
         f"depth=[{depth.min():.2f},{depth.max():.2f},nuniq={len(np.unique(depth))}] "
-        f"sem_sum1={np.all(sem.sum(axis=0) == 1.0)}"
+        f"sem_id=[min={sem_id.min():.0f},max={sem_id.max():.0f}]"
     )
 
 
-def assert_nonempty_observation(obs: np.ndarray) -> None:
-    """Assert that rgb/depth/semantic are not blank."""
+def assert_nonempty_stage1_observation(obs: np.ndarray) -> None:
+    """Assert that rgb/depth/semantic_id channels are not blank (Stage 1)."""
     rgb = obs[:3]
     depth = obs[3]
-    sem = obs[4:20]
+    sem_id = obs[4]
 
     # RGB: sum > 0 and variance > 0
     assert rgb.sum() > 0, "RGB block is all zeros"
@@ -102,9 +102,8 @@ def assert_nonempty_observation(obs: np.ndarray) -> None:
     # Depth: not all identical
     assert len(np.unique(depth)) > 1, "Depth block is a single uniform value"
 
-    # Semantic: at least one valid integer id >= 0
-    sem_ids = sem.argmax(axis=0)  # channel index per pixel
-    assert sem_ids.max() >= 0, "Semantic block has no valid ids"
+    # Semantic ID: at least one non-negative integer id
+    assert sem_id.max() >= 0, "Semantic ID block has no valid ids"
 
 
 def _build_class_id_to_name() -> dict[int, str]:
@@ -222,17 +221,11 @@ def main():
     print(f"  goal_name  : {info['goal_name']}")
     print(f"  obs detail : {summarize_observation(obs)}")
 
-    assert obs.shape == (20, 120, 160), f"Expected (20,120,160), got {obs.shape}"
+    assert obs.shape == (5, 120, 160), f"Expected (5,120,160), got {obs.shape}"
     assert obs.dtype == np.float32
     print("  [PASS] reset obs shape & dtype")
 
-    sem_block = obs[4:20]
-    assert sem_block.shape == (16, 120, 160)
-    sums = sem_block.sum(axis=0)
-    assert np.all(sums == 1.0), "One-hot integrity failed"
-    print("  [PASS] semantic block shape & one-hot integrity")
-
-    assert_nonempty_observation(obs)
+    assert_nonempty_stage1_observation(obs)
     print("  [PASS] reset observation is non-empty")
 
     # ---- 5. Action sequence ----
@@ -261,7 +254,7 @@ def main():
         )
 
         # --- per-step asserts ---
-        assert obs.shape == (20, 120, 160)
+        assert obs.shape == (5, 120, 160)
 
         # fail_case required keys
         for k in ("collision", "success", "detection", "exploration"):
@@ -273,14 +266,13 @@ def main():
                 f"LOOK action should have zero sensor_pose, got {info['sensor_pose']}"
             )
 
-        # semantic block integrity
-        s = obs[4:20]
-        assert s.shape == (16, 120, 160)
-        assert np.all(s.sum(axis=0) == 1.0)
+        # Semantic ID channel (ch4): values must be non-negative
+        sem_id = obs[4]
+        assert sem_id.min() >= 0, f"Semantic ID has negative values: {sem_id.min()}"
 
         # Non-empty observation: check first and last steps
         if step_i == 0 or step_i == len(ACTION_SEQUENCE) - 1:
-            assert_nonempty_observation(obs)
+            assert_nonempty_stage1_observation(obs)
             print(f"       [PASS] step {step_i} observation is non-empty")
 
         # Let physics settle
