@@ -7,27 +7,41 @@ from envs.igibson.semantic_taxonomy import SemanticTaxonomy
 
 
 class TestKnownClassMapping:
-    """Verify that each L3MVN category keyword maps to the expected semantic id."""
+    """Verify curated alias mapping to L3MVN semantic ids."""
 
     @pytest.mark.parametrize(
         "name,expected",
         [
             ("chair", 1),
             ("armchair", 1),
+            ("office_chair", 1),
+            ("folding_chair", 1),
+            ("straight_chair", 1),
+            ("swivel_chair", 1),
+            ("rocking_chair", 1),
             ("highchair", 1),
             ("stool", 1),
             ("bench", 1),
             ("sofa", 2),
+            ("chaise_longue", 2),
             ("couch", 2),
             ("loveseat", 2),
+            ("sectional", 2),
+            ("futon", 2),
             ("plant", 3),
-            ("potted plant", 3),
+            ("potted_plant", 3),
+            ("pot_plant", 3),
+            ("vase_plant", 3),
             ("flower", 3),
             ("bed", 4),
+            ("bunk_bed", 4),
+            ("crib", 4),
             ("toilet", 5),
             ("tv", 6),
             ("television", 6),
             ("monitor", 6),
+            ("standing_tv", 6),
+            ("wall_mounted_tv", 6),
             ("screen", 6),
             ("bathtub", 7),
             ("tub", 7),
@@ -41,18 +55,45 @@ class TestKnownClassMapping:
             ("washer", 10),
             ("dryer", 10),
             ("stove", 10),
+            ("griddle", 10),
+            ("grill", 10),
+            ("heater", 10),
+            ("iron", 10),
+            ("kettle", 10),
+            ("range_hood", 10),
+            ("toaster", 10),
+            ("vacuum", 10),
+            ("burner", 10),
+            ("blender", 10),
+            ("coffee_maker", 10),
             ("cooktop", 10),
             ("towel", 11),
+            ("bath_towel", 11),
+            ("hand_towel", 11),
+            ("dishtowel", 11),
+            ("rag", 11),
             ("sink", 12),
             ("basin", 12),
+            ("bathroom_sink", 12),
+            ("kitchen_sink", 12),
             ("dresser", 13),
             ("chest_of_drawers", 13),
             ("drawer", 13),
+            ("bureau", 13),
+            ("cabinet_dresser", 13),
             ("table", 14),
             ("desk", 14),
             ("counter", 14),
+            ("countertop", 14),
             ("coffee_table", 14),
             ("dining_table", 14),
+            ("breakfast_table", 14),
+            ("side_table", 14),
+            ("console_table", 14),
+            ("gaming_table", 14),
+            ("pedestal_table", 14),
+            ("pool_table", 14),
+            ("kitchen_counter", 14),
             ("stairs", 15),
             ("stair", 15),
         ],
@@ -68,13 +109,32 @@ class TestKnownClassMapping:
         assert SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id("armchair.n.01") == 1
         assert SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id("dining_table.n.01") == 14
 
+    def test_word_separator_normalization(self):
+        assert SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id("kitchen-counter") == 14
+        assert SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id("Bath Towel") == 11
+
 
 class TestUnknownClassMapping:
     """Unmapped, empty, and None class names must return semantic id 0."""
 
     @pytest.mark.parametrize(
         "name",
-        ["wall", "floor", "ceiling", "robot", "door", "window", "cabinet", ""],
+        [
+            "wall",
+            "floor",
+            "ceiling",
+            "robot",
+            "door",
+            "window",
+            "cabinet",
+            "bookshelf",
+            "bookcase",
+            "shelf",
+            "rack",
+            "tv_stand",
+            "ottoman",
+            "",
+        ],
     )
     def test_returns_zero(self, name):
         assert SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id(name) == 0
@@ -148,4 +208,3 @@ class TestLookupAndRemap:
 class TestConstants:
     def test_num_channels_constant(self):
         assert SemanticTaxonomy.NUM_CHANNELS == 16
-

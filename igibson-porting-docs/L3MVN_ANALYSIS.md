@@ -214,7 +214,7 @@ zeroshot 구현은 “frontier”를 별도 객체로 들고 가지 않고,
 > iGibson 이식 시:
 > - frontier 자체 표현은 “label map(2D)”로 유지하면 가장 이식이 쉬움.
 > - 핵심 갭은 semantic taxonomy( hm3d_category vs iGibson categories )라서,
->   objs_list 생성부만 taxonomy adapter로 교체하면 prompt/scoring 루프를 유지 가능.
+>   objs_list 생성부만 curated taxonomy adapter로 교체하면 prompt/scoring 루프를 유지 가능.
 > - `category_to_id`(6개)는 목표 카테고리 정의로, iGibson에서 지원하는 목표 객체 범위에 따라
 >   별도 매핑이 필요할 수 있음.
 
@@ -258,14 +258,15 @@ increase_local_map, local_map, local_map_stair, local_pose = \
 
 ---
 
-## 6. 무엇이 아직 “코드만으로는 확정 불가”인가 (남은 TODO)
+## 6. Semantic taxonomy 상태
 
-### 6.1 iGibson GT semantic mapping 확정 (외부 필요)
-- L3MVN은 hm3d_category / coco_categories 같은 “정해진 카테고리 문자열”을 사용 (constants.py)
-- iGibson은 semantic id → 카테고리명 제공 방식이 API/버전에 따라 다를 수 있어,
-  (semantic_id 이미지 dtype, id namespace, category name source)
-  를 실제 iGibson에서 확인하거나 공식 문서를 기준으로 확정해야 함.
-→ **IGIBSON_ANALYSIS.md에서 해결됨** (Section 10-14)
+### 6.1 iGibson GT semantic remap (curated)
+- L3MVN은 hm3d_category(15개)의 정해진 semantic class 문자열을 사용한다.
+- iGibson semantic id -> class name -> L3MVN id remap은
+  `SemanticTaxonomy`의 curated alias table로 deterministic하게 처리한다.
+- Stage 1에서는 remapped semantic id single-channel만 전달하고,
+  Stage 2 one-hot(16ch)은 `_preprocess_obs()`가 생성한다.
+- 애매한 클래스(`cabinet`, `bookshelf`, `tv_stand` 등)는 0(background/ignore)로 유지한다.
 
 ## 7. 기타 note
 

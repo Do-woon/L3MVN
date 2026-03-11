@@ -15,7 +15,7 @@ import sys
 import types
 
 import numpy as np
-from envs.igibson.semantic_taxonomy import SemanticTaxonomy
+from envs.igibson.semantic_taxonomy import L3MVN_CATEGORY_TO_ID, SemanticTaxonomy
 
 
 def _make_args():
@@ -41,6 +41,10 @@ def _make_args():
 
 
 REQUIRED_FAIL_CASE_KEYS = ("collision", "success", "detection", "exploration")
+ALLOWED_NON_FLOOR_CONTACTS = 0
+SEMANTIC_ID_TO_NAME = {v: k for k, v in L3MVN_CATEGORY_TO_ID.items()}
+SEMANTIC_ID_TO_NAME[0] = "background_or_unmapped"
+SEMANTIC_ID_TO_NAME[16] = "extra_channel_reserved"
 
 def _build_preprocess_callable(args):
     """Build callable that directly invokes real Sem_Exp_Env_Agent._preprocess_obs."""
@@ -97,6 +101,87 @@ def _assert_stage1_single_contract(obs_stage1_single: np.ndarray, label: str) ->
         f"[{label}] Stage1 semantic stats: min={int(sem_i32.min())}, "
         f"max={int(sem_i32.max())}, n_unique={len(uniq)}"
     )
+
+
+def _unwrap_class_id_to_name(vec_env) -> dict[int, str]:
+    inner = getattr(vec_env, "_env", None)
+    assert inner is not None, "SingleEnvVecWrapper must expose inner _env"
+    class_id_to_name = getattr(inner, "_class_id_to_name", None)
+    assert isinstance(class_id_to_name, dict), "EnvWrapper must expose class_id_to_name dict"
+    return class_id_to_name
+
+
+def _assert_spawn_collision_free(vec_env) -> None:
+    import pybullet as p
+
+    inner = getattr(vec_env, "_env", None)
+    assert inner is not None, "SingleEnvVecWrapper must expose inner _env"
+    sim = getattr(inner, "_env", None)
+    scene = getattr(inner, "_scene", None)
+    robot = getattr(inner, "_robot", None)
+    assert sim is not None and scene is not None and robot is not None
+
+    body_ids = robot.get_body_ids()
+    assert body_ids, "Robot has no body ids; cannot evaluate collisions."
+    body_id = body_ids[0]
+    floor_ids = set(getattr(scene, "floor_body_ids", []) or [])
+    try:
+        floor_z = float(scene.floor_heights[0])
+    except (AttributeError, IndexError, TypeError):
+        floor_z = 0.0
+
+    p.performCollisionDetection()
+    contacts = p.getContactPoints(bodyA=body_id)
+    non_floor_contacts = 0
+    for c in contacts:
+        body_b = c[2]
+        if body_b == body_id or body_b in floor_ids:
+            continue
+        if abs(c[7][2]) > 0.7 and c[5][2] < floor_z + 0.15:
+            continue
+        non_floor_contacts += 1
+
+    spawn_attempts = getattr(sim, "_spawn_collision_free_attempts", None)
+    print(
+        f"[reset] spawn debug: attempts={spawn_attempts}, "
+        f"non_floor_contacts={non_floor_contacts}"
+    )
+    assert non_floor_contacts <= ALLOWED_NON_FLOOR_CONTACTS, (
+        f"Spawn is in collision state: non-floor contacts={non_floor_contacts}"
+    )
+    print("[reset] spawn collision-free check: PASS")
+
+
+def _print_stage1_semantic_distribution(obs_stage1_single: np.ndarray, label: str) -> None:
+    sem_i32 = obs_stage1_single[4].astype(np.int32)
+    uniq, counts = np.unique(sem_i32, return_counts=True)
+    total = int(sem_i32.size)
+
+    summary = []
+    for sem_id, count in zip(uniq.tolist(), counts.tolist()):
+        name = SEMANTIC_ID_TO_NAME.get(sem_id, "unknown_id")
+        ratio = 100.0 * float(count) / float(total)
+        summary.append(f"{sem_id}:{name} ({count}px, {ratio:.2f}%)")
+    print(f"[{label}] Stage1 semantic IDs in frame: " + ", ".join(summary))
+
+
+def _print_semantic_lookup_summary(class_id_to_name: dict[int, str]) -> None:
+    id_to_sem = SemanticTaxonomy.build_id_to_l3mvn_semantic_id(class_id_to_name)
+    sem_to_class_names: dict[int, list[str]] = {sid: [] for sid in range(0, 16)}
+    for class_id, sem_id in id_to_sem.items():
+        if 0 <= sem_id <= 15:
+            sem_to_class_names[sem_id].append(class_id_to_name[class_id])
+
+    print("[taxonomy] iGibson class-name mapping summary:")
+    for sem_id in range(0, 16):
+        names = sorted(sem_to_class_names[sem_id])
+        sem_name = SEMANTIC_ID_TO_NAME.get(sem_id, "unknown_id")
+        preview = ", ".join(names[:8]) if names else "-"
+        more = "" if len(names) <= 8 else f", ... (+{len(names) - 8} more)"
+        print(
+            f"  sem_id={sem_id:2d} ({sem_name}): "
+            f"mapped_class_names={len(names)}; sample=[{preview}{more}]"
+        )
 
 
 def _validate_stage2(
@@ -170,13 +255,17 @@ def main():
     try:
         print("\n[1] make_vec_envs(args) ...")
         envs = make_vec_envs(args)
+        class_id_to_name = _unwrap_class_id_to_name(envs)
+        _print_semantic_lookup_summary(class_id_to_name)
 
         print("\n[2] reset() Stage1 capture ...")
         obs_stage1_batch, infos = envs.reset()
         _assert_stage1_batch_contract(obs_stage1_batch, infos, args)
         print("[reset] collision: N/A (reset path has no fail_case)")
+        _assert_spawn_collision_free(envs)
         obs0 = obs_stage1_batch[0]
         _assert_stage1_single_contract(obs0, "reset")
+        _print_stage1_semantic_distribution(obs0, "reset")
 
         obs_stage2 = preprocess_obs_fn(obs0)
         _validate_stage2("reset", obs0, obs_stage2, args)
@@ -196,6 +285,7 @@ def main():
         _assert_stage1_batch_contract(obs_stage1_batch, infos, args)
         obs1 = obs_stage1_batch[0]
         _assert_stage1_single_contract(obs1, "step_action_1")
+        _print_stage1_semantic_distribution(obs1, "step_action_1")
 
         obs_stage2_step = preprocess_obs_fn(obs1)
         _validate_stage2("step_action_1", obs1, obs_stage2_step, args)

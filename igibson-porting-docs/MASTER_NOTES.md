@@ -277,9 +277,14 @@ infos_list 각 원소가 반드시 포함해야 하는 키:
 
 ### 7.6 igibson_adapter.SemanticTaxonomy
 - iGibson semantic id -> canonical name 매핑 확보
-- canonical name -> L3MVN category index(1..K) 매핑 정의
+- canonical name -> L3MVN category index(1..15) 매핑 정의
+- 매핑 방식은 deterministic curated alias table 중심으로 유지
+  - exact/normalized alias 매칭 우선
+  - 최소한의 보조 fallback만 허용
 - 목표물(goal)도 동일 taxonomy 상의 문자열로 표현
-- taxonomy는 해석 규칙을 제공하며, 16채널 one-hot 생성 위치는 `_preprocess_obs`이다.
+- `cabinet`, `bookshelf`, `tv_stand` 등 애매한 클래스는 0(background/ignore) 유지
+- taxonomy는 Stage 1 semantic id 해석 규칙만 제공하며,
+  16채널 one-hot 생성 위치는 `_preprocess_obs`이다.
 
 ### 7.7 igibson_adapter.DiscreteActionExecutor
 - actions: **6개 이산 액션** (agents/sem_exp.py:302-336)
@@ -318,7 +323,7 @@ infos_list 각 원소가 반드시 포함해야 하는 키:
 | RGB | uint8 (H,W,3) | ? | - | ObsAdapter |
 | Depth (Stage 1) | raw metres, single channel | ? | 센서 포맷 정렬 | ObsAdapter |
 | Depth (Stage 2) | mapper 입력용 **cm** | `_preprocess_depth` 경로 | 전처리 경로 연결 | Sem_Exp_Env_Agent._preprocess_obs |
-| Semantic GT (Stage 1) | int id map, single channel | uint32 id map + mapping dict | id space mismatch | ObsAdapter + SemanticTaxonomy |
+| Semantic GT (Stage 1) | int id map, single channel | uint32 id map + mapping dict | curated alias remap + background 허용 | ObsAdapter + SemanticTaxonomy |
 | Semantic one-hot (Stage 2) | 16채널 one-hot | `_preprocess_obs` 변환 | one-hot 생성 위치 고정 | Sem_Exp_Env_Agent._preprocess_obs |
 | Pose (sensor_pose) | [dx,dy,do] delta (meters, radians) | base pose + camera extrinsic | frame/delta 변환 | ObsAdapter (pose) |
 | Pose (eve_angle) | elevation angle (0/-30/-60) | camera tilt state | elevation 상태 관리 | DiscreteActionExecutor |
@@ -363,7 +368,7 @@ category_to_id = ["chair", "bed", "plant", "toilet", "tv_monitor", "sofa"]
 - 즉 **LLM scoring의 출력 차원은 6** (hm3d 15개가 아님)
 
 > iGibson 이식 시:
-> - hm3d_category(15개)는 semantic map 채널과 objs_list에 사용 → taxonomy adapter 대상
+> - hm3d_category(15개)는 semantic map 채널과 objs_list에 사용 → curated taxonomy adapter 대상
 > - category_to_id(6개)는 탐색 목표 정의에 사용 → iGibson 목표 정의와 매핑 필요
 > - 두 리스트는 역할이 다르므로 독립적으로 관리해야 함
 
