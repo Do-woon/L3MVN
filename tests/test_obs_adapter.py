@@ -168,7 +168,7 @@ class TestMismatchedSpatialShapes:
 
 class TestSemanticTaxonomyCompatibility:
     """Verify that ObsAdapter's channel-4 output feeds cleanly into
-    SemanticTaxonomy.semantic_id_map_to_one_hot().
+    SemanticTaxonomy.remap_semantic_id_map().
 
     ObsAdapter produces float32 ids; taxonomy expects integer ids.
     The cast from float32 → int32 is the caller's responsibility and
@@ -195,35 +195,33 @@ class TestSemanticTaxonomyCompatibility:
         ], dtype=np.int32)
         return adapter.adapt(rgb, depth, sem), sem
 
-    def test_one_hot_shape(self, adapter):
+    def test_remap_shape(self, adapter):
         obs, _ = self._build_obs(adapter)
         sem_channel = obs[4]                          # (4, 5) float32
         sem_int = sem_channel.astype(np.int32)        # cast: float32 → int32
-        one_hot = SemanticTaxonomy.semantic_id_map_to_one_hot(
-            sem_int, self.CLASS_ID_TO_NAME
-        )
-        assert one_hot.shape == (16, 4, 5)
+        remapped = SemanticTaxonomy.remap_semantic_id_map(sem_int, self.CLASS_ID_TO_NAME)
+        assert remapped.shape == (4, 5)
 
-    def test_one_hot_channel_sum_is_one(self, adapter):
+    def test_remap_values_expected(self, adapter):
         obs, _ = self._build_obs(adapter)
         sem_int = obs[4].astype(np.int32)
-        one_hot = SemanticTaxonomy.semantic_id_map_to_one_hot(
-            sem_int, self.CLASS_ID_TO_NAME
-        )
-        np.testing.assert_array_equal(
-            one_hot.sum(axis=0),
-            np.ones((4, 5), dtype=np.uint8),
-        )
+        remapped = SemanticTaxonomy.remap_semantic_id_map(sem_int, self.CLASS_ID_TO_NAME)
+        # CLASS_ID_TO_NAME:
+        # 0->wall->0, 1->chair->1, 2->sofa->2, 3->sink->12, 4->toilet->5
+        expected = np.array([
+            [0, 1, 2, 12, 5],
+            [1, 0, 12, 2, 5],
+            [5, 12, 1, 0, 2],
+            [2, 5, 0, 1, 12],
+        ], dtype=np.int32)
+        np.testing.assert_array_equal(remapped, expected)
 
-    def test_one_hot_chair_channel(self, adapter):
-        """id=1 (chair) must activate channel 1 in the taxonomy output."""
+    def test_remap_chair_semantic_id(self, adapter):
+        """id=1 (chair) must map to semantic id 1."""
         obs, sem_original = self._build_obs(adapter)
         sem_int = obs[4].astype(np.int32)
-        one_hot = SemanticTaxonomy.semantic_id_map_to_one_hot(
-            sem_int, self.CLASS_ID_TO_NAME
-        )
-        expected_chair = (sem_original == 1).astype(np.uint8)
-        np.testing.assert_array_equal(one_hot[1], expected_chair)
+        remapped = SemanticTaxonomy.remap_semantic_id_map(sem_int, self.CLASS_ID_TO_NAME)
+        np.testing.assert_array_equal(remapped[sem_original == 1], 1)
 
     def test_round_trip_semantic_id_preserved(self, adapter):
         """Semantic ids must survive the ObsAdapter float32 round-trip."""

@@ -42,6 +42,10 @@ class SingleEnvVecWrapper:
 
     def __init__(self, env_wrapper: EnvWrapper) -> None:
         self._env = env_wrapper
+        # Keep Vec-like metadata when available.
+        self.observation_space = getattr(env_wrapper, "observation_space", None)
+        self.action_space = getattr(env_wrapper, "action_space", None)
+        self._pending_actions = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -90,6 +94,22 @@ class SingleEnvVecWrapper:
         if hasattr(self._env, "close"):
             self._env.close()
 
+    def step(self, actions):
+        """Compatibility helper: route to ``plan_act_and_preprocess``."""
+        return self.plan_act_and_preprocess(actions)
+
+    def step_async(self, actions) -> None:
+        """Store pending actions for a later ``step_wait`` call."""
+        self._pending_actions = actions
+
+    def step_wait(self):
+        """Execute actions previously passed to ``step_async``."""
+        if self._pending_actions is None:
+            raise RuntimeError("step_wait() called before step_async()")
+        actions = self._pending_actions
+        self._pending_actions = None
+        return self.plan_act_and_preprocess(actions)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -124,7 +144,7 @@ class SingleEnvVecWrapper:
         """
         if isinstance(planner_inputs, dict):
             return planner_inputs
-        if isinstance(planner_inputs, (list, tuple)) and len(planner_inputs) >= 1:
+        if isinstance(planner_inputs, (list, tuple)) and len(planner_inputs) == 1:
             first = planner_inputs[0]
             if not isinstance(first, dict):
                 raise ValueError(
@@ -132,6 +152,6 @@ class SingleEnvVecWrapper:
                 )
             return first
         raise ValueError(
-            f"planner_inputs must be a dict or a non-empty list/tuple of dicts, "
+            f"planner_inputs must be a dict or a length-1 list/tuple of dicts, "
             f"got {type(planner_inputs)}"
         )

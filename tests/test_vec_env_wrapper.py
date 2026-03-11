@@ -178,6 +178,16 @@ class TestStepListOfDict:
         vec.plan_act_and_preprocess(({"action": 3},))
         mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 3})
 
+    def test_list_len_gt_one_raises(self):
+        vec = _build_vec_wrapper()
+        with pytest.raises(ValueError):
+            vec.plan_act_and_preprocess([{"action": 1}, {"action": 2}])
+
+    def test_tuple_len_gt_one_raises(self):
+        vec = _build_vec_wrapper()
+        with pytest.raises(ValueError):
+            vec.plan_act_and_preprocess(({"action": 1}, {"action": 2}))
+
 
 # =========================================================================
 # Test 4: done wrapping
@@ -268,3 +278,42 @@ class TestNumEnvs:
     def test_num_envs_is_one(self):
         vec = _build_vec_wrapper()
         assert vec.num_envs == 1
+
+
+# =========================================================================
+# Test 8: async/step compatibility interface
+# =========================================================================
+
+class TestAsyncStepCompatibility:
+    def test_step_async_then_wait(self):
+        mock_inner = MagicMock()
+        mock_inner.reset.return_value = (_make_obs(), _make_info())
+        mock_inner.plan_act_and_preprocess.return_value = (
+            _make_obs(), _make_fail_case(), False, _make_info()
+        )
+        vec = SingleEnvVecWrapper(mock_inner)
+
+        vec.step_async({"action": 1})
+        obs_batch, fail_case_batch, done_batch, infos_list = vec.step_wait()
+
+        assert obs_batch.shape == (1, 5, H, W)
+        assert len(fail_case_batch) == 1
+        assert len(done_batch) == 1
+        assert len(infos_list) == 1
+        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 1})
+
+    def test_step_wait_without_async_raises(self):
+        vec = _build_vec_wrapper()
+        with pytest.raises(RuntimeError):
+            vec.step_wait()
+
+    def test_step_alias_calls_plan_act_and_preprocess(self):
+        mock_inner = MagicMock()
+        mock_inner.reset.return_value = (_make_obs(), _make_info())
+        mock_inner.plan_act_and_preprocess.return_value = (
+            _make_obs(), _make_fail_case(), False, _make_info()
+        )
+        vec = SingleEnvVecWrapper(mock_inner)
+
+        vec.step({"action": 5})
+        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 5})

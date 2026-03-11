@@ -1,31 +1,26 @@
-"""Semantic taxonomy: maps iGibson class names / semantic-id maps
-to L3MVN's 16-channel one-hot representation.
+"""Semantic taxonomy: maps iGibson class names / semantic ids
+to L3MVN semantic IDs.
 
-Channel layout
---------------
-  0  : background / unmapped / unknown
-  1  : chair
-  2  : sofa
-  3  : plant
-  4  : bed
-  5  : toilet
-  6  : tv_monitor
-  7  : bathtub
-  8  : shower
-  9  : fireplace
-  10 : appliances
-  11 : towel
-  12 : sink
-  13 : chest_of_drawers
-  14 : table
-  15 : stairs
+Final responsibility split (L3MVN-compatible)
+---------------------------------------------
+- Adapter layer (EnvWrapper/ObsAdapter) should output Stage-1 semantic *id*
+  single-channel.
+- Stage-2 one-hot(16ch) generation belongs to
+  ``Sem_Exp_Env_Agent._preprocess_obs()``, not this module.
+
+This module therefore focuses on:
+1) class-name -> L3MVN semantic id mapping
+2) iGibson semantic-id map -> L3MVN semantic-id map remapping
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-NUM_CHANNELS: int = 16  # channel 0 = background + 15 L3MVN categories
+# L3MVN semantic id space used before Stage-2 one-hot conversion:
+# 0: unknown/background, 1..15: named categories, 16: optional extra.
+NUM_SEMANTIC_CHANNELS: int = 16
+BACKGROUND_SEMANTIC_ID: int = 0
 
 # ---------------------------------------------------------------------------
 # Keyword → L3MVN channel index rules
@@ -103,21 +98,21 @@ _SORTED_RULES: list[tuple[str, int]] = sorted(
 
 
 class SemanticTaxonomy:
-    """Maps iGibson semantic information to L3MVN's 16-channel one-hot format.
+    """Maps iGibson semantic information to L3MVN semantic IDs.
 
     All public methods are static so the class can be used without
-    instantiation and reused directly inside an ObsAdapter.
+    instantiation and reused directly inside wrappers/adapters.
     """
 
-    NUM_CHANNELS: int = NUM_CHANNELS
+    NUM_CHANNELS: int = NUM_SEMANTIC_CHANNELS
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     @staticmethod
-    def map_class_name_to_l3mvn_index(class_name: str | None) -> int:
-        """Return the L3MVN channel index (0–15) for *class_name*.
+    def map_class_name_to_l3mvn_semantic_id(class_name: str | None) -> int:
+        """Return L3MVN semantic id (0..15) for *class_name*.
 
         Parameters
         ----------
@@ -127,7 +122,7 @@ class SemanticTaxonomy:
         Returns
         -------
         int
-            1–15 for a known L3MVN category, 0 for background / unknown.
+            1–15 for a known L3MVN category, 0 for unknown/background.
         """
         if not class_name:
             return 0
@@ -138,8 +133,10 @@ class SemanticTaxonomy:
         return 0
 
     @staticmethod
-    def build_id_to_l3mvn_index(class_id_to_name: dict[int, str]) -> dict[int, int]:
-        """Build a mapping from iGibson semantic-id to L3MVN channel index.
+    def build_id_to_l3mvn_semantic_id(
+        class_id_to_name: dict[int, str],
+    ) -> dict[int, int]:
+        """Build iGibson semantic-id -> L3MVN semantic-id lookup table.
 
         Parameters
         ----------
@@ -149,48 +146,39 @@ class SemanticTaxonomy:
         Returns
         -------
         dict[int, int]
-            id → L3MVN channel index (0 = background).
+            id -> L3MVN semantic id (0 = unknown/background, 1..15 named).
         """
         return {
-            cid: SemanticTaxonomy.map_class_name_to_l3mvn_index(name)
+            cid: SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id(name)
             for cid, name in class_id_to_name.items()
         }
 
     @staticmethod
-    def semantic_id_map_to_one_hot(
+    def remap_semantic_id_map(
         semantic_id_map: np.ndarray,
         class_id_to_name: dict[int, str],
     ) -> np.ndarray:
-        """Convert a semantic id map to a 16-channel one-hot array.
+        """Convert iGibson semantic-id map to L3MVN semantic-id map.
 
         Parameters
         ----------
         semantic_id_map : np.ndarray, shape (H, W), integer dtype
             Per-pixel iGibson semantic class ids.
         class_id_to_name : dict[int, str]
-            iGibson id → class name dictionary.
+            iGibson id -> class name dictionary.
 
         Returns
         -------
-        np.ndarray, shape (16, H, W), dtype uint8
-            One-hot encoded semantic map.  Channel 0 is background/unknown.
-            Every pixel has exactly one channel set to 1.
+        np.ndarray, shape (H, W), dtype int32
+            L3MVN semantic id map in {0..15}, where 0=unknown/background.
         """
         if semantic_id_map.ndim != 2:
             raise ValueError(
                 f"semantic_id_map must be 2-D (H, W), got shape {semantic_id_map.shape}"
             )
-        h, w = semantic_id_map.shape
-        id_to_idx = SemanticTaxonomy.build_id_to_l3mvn_index(class_id_to_name)
 
-        # Every pixel starts at channel 0 (background).
-        # Known ids overwrite their pixels with the appropriate channel index.
-        channel_map = np.zeros((h, w), dtype=np.int32)
-        for cid, idx in id_to_idx.items():
-            channel_map[semantic_id_map == cid] = idx
-
-        one_hot = np.zeros((NUM_CHANNELS, h, w), dtype=np.uint8)
-        for c in range(NUM_CHANNELS):
-            one_hot[c] = channel_map == c
-
-        return one_hot
+        id_to_sem_id = SemanticTaxonomy.build_id_to_l3mvn_semantic_id(class_id_to_name)
+        remapped = np.zeros_like(semantic_id_map, dtype=np.int32)
+        for class_id, sem_id in id_to_sem_id.items():
+            remapped[semantic_id_map == class_id] = sem_id
+        return remapped

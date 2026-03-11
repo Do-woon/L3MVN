@@ -5,8 +5,7 @@ All tests use mock objects — no iGibson runtime required.
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -99,7 +98,7 @@ class FakeExecutor:
         return [0.05, 0.0, 0.1], self.last_collision
 
 
-def _build_wrapper(executor=None, max_steps=500) -> EnvWrapper:
+def _build_wrapper(executor=None, max_steps=500, class_id_to_name=None) -> EnvWrapper:
     """Build an EnvWrapper backed by mocks.
 
     The mock Simulator exposes `.renderer.width`, `.renderer.height`
@@ -113,6 +112,8 @@ def _build_wrapper(executor=None, max_steps=500) -> EnvWrapper:
 
     if executor is None:
         executor = FakeExecutor()
+    if class_id_to_name is None:
+        class_id_to_name = CLASS_ID_TO_NAME
 
     return EnvWrapper(
         igibson_env=mock_env,
@@ -123,7 +124,7 @@ def _build_wrapper(executor=None, max_steps=500) -> EnvWrapper:
         semantic_taxonomy=SemanticTaxonomy,
         goal_name="chair",
         goal_cat_id=1,
-        class_id_to_name=CLASS_ID_TO_NAME,
+        class_id_to_name=class_id_to_name,
         max_steps=max_steps,
     )
 
@@ -275,6 +276,32 @@ class TestSemanticBlock:
         assert depth_ch.shape == (H, W)
         assert depth_ch.dtype == np.float32
         assert np.all(depth_ch >= 0)
+
+    def test_ch4_semantic_id_remapped_to_l3mvn_ids(self):
+        """EnvWrapper must remap iGibson class ids to L3MVN semantic ids."""
+        w = _build_wrapper()
+        obs, _ = w.reset()
+        sem_ch = obs[4].astype(np.int32)
+        # With CLASS_ID_TO_NAME {0:wall,1:chair,2:sofa,3:sink}
+        # expected L3MVN ids are {0,1,2,12}.
+        assert set(np.unique(sem_ch)).issubset({0, 1, 2, 12})
+
+    def test_ch4_semantic_id_exact_mapping(self):
+        """Per-pixel remap result must match SemanticTaxonomy mapping."""
+        w = _build_wrapper()
+        obs, _ = w.reset()
+        sem_raw = _make_semantic()
+        expected = SemanticTaxonomy.remap_semantic_id_map(sem_raw, CLASS_ID_TO_NAME)
+        np.testing.assert_array_equal(obs[4].astype(np.int32), expected)
+
+    def test_unmapped_igibson_class_id_maps_to_zero(self):
+        """Unknown class ids must fall back to background id 0."""
+        class_id_to_name = {0: "wall", 1: "chair", 3: "sink"}  # id=2 omitted
+        w = _build_wrapper(class_id_to_name=class_id_to_name)
+        obs, _ = w.reset()
+        sem_raw = _make_semantic()
+        remapped = obs[4].astype(np.int32)
+        np.testing.assert_array_equal(remapped[sem_raw == 2], 0)
 
 
 # =========================================================================

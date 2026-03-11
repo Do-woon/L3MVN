@@ -94,16 +94,29 @@ def summarize_obs_batch(obs_batch: np.ndarray) -> str:
     obs = obs_batch[0]  # (5, H, W)
     rgb = obs[:3]
     depth = obs[3]
-    sem_id = obs[4]
+    sem_id = obs[4].astype(np.int32)
+    uniq = np.unique(sem_id)
     return (
         f"rgb=[{rgb.min():.1f},{rgb.max():.1f},var={rgb.var():.2f}] "
         f"depth=[{depth.min():.3f},{depth.max():.3f}] "
-        f"sem_id=[{sem_id.min():.0f},{sem_id.max():.0f}]"
+        f"sem_id=[{sem_id.min()},{sem_id.max()},nuniq={len(uniq)}]"
     )
 
 
-def assert_nonempty_stage1_observation(obs: np.ndarray) -> None:
-    """Assert Stage-1 obs (5,H,W) has non-blank RGB, depth, and semantic ID."""
+def _allowed_l3mvn_semantic_ids(class_id_to_name: dict[int, str]) -> set[int]:
+    mapped = {
+        SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id(name)
+        for name in class_id_to_name.values()
+    }
+    mapped.add(0)
+    return mapped
+
+
+def assert_stage1_observation_contract(
+    obs: np.ndarray,
+    class_id_to_name: dict[int, str],
+) -> None:
+    """Assert Stage-1 obs (5,H,W): non-blank + L3MVN semantic-id contract."""
     rgb = obs[:3]
     depth = obs[3]
     sem_id = obs[4]
@@ -111,7 +124,18 @@ def assert_nonempty_stage1_observation(obs: np.ndarray) -> None:
     assert rgb.sum() > 0, "RGB block is all zeros"
     assert rgb.var() > 0, "RGB block has zero variance (solid colour)"
     assert len(np.unique(depth)) > 1, "Depth block is a single uniform value"
-    assert sem_id.max() >= 0, "Semantic ID block has no valid ids"
+
+    sem_id_i32 = sem_id.astype(np.int32)
+    np.testing.assert_array_equal(sem_id, sem_id_i32.astype(np.float32))
+    assert sem_id_i32.min() >= 0, f"Semantic ID has negative values: {sem_id_i32.min()}"
+    assert sem_id_i32.max() <= 15, f"Semantic ID exceeds L3MVN range: {sem_id_i32.max()}"
+
+    allowed = _allowed_l3mvn_semantic_ids(class_id_to_name)
+    uniq = set(np.unique(sem_id_i32).tolist())
+    assert uniq.issubset(allowed), (
+        f"Unexpected semantic IDs found: {sorted(uniq - allowed)}; "
+        f"allowed subset example: {sorted(list(allowed))[:16]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +298,8 @@ def main(save_obs: bool = False, out_dir: str = "./smoke_obs_out"):
         assert key in infos_list[0], f"Missing key in reset infos_list[0]: {key}"
     print("  [PASS] reset batch shape, dtype, infos contract")
 
-    assert_nonempty_stage1_observation(obs_batch[0])
-    print("  [PASS] reset observation is non-empty (Stage 1)")
+    assert_stage1_observation_contract(obs_batch[0], class_id_to_name)
+    print("  [PASS] reset observation satisfies Stage-1 contract")
 
     if save_obs:
         _save_obs(obs_batch, "reset", out_dir)
@@ -322,12 +346,9 @@ def main(save_obs: bool = False, out_dir: str = "./smoke_obs_out"):
         for k in REQUIRED_INFO_KEYS:
             assert k in infos_list[0], f"Missing info key: {k}"
 
-        sem_id = obs_batch[0, 4]
-        assert sem_id.min() >= 0, f"Semantic ID has negative values at step {step_i}"
-
         if step_i == 0 or step_i == len(ACTION_SEQUENCE) - 1:
-            assert_nonempty_stage1_observation(obs_batch[0])
-            print(f"       [PASS] step {step_i} obs non-empty")
+            assert_stage1_observation_contract(obs_batch[0], class_id_to_name)
+            print(f"       [PASS] step {step_i} obs satisfies Stage-1 contract")
 
         if save_obs:
             _save_obs(obs_batch, f"step_{step_i:03d}_{ACTION_NAMES[action_id]}", out_dir)

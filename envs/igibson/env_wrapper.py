@@ -4,7 +4,7 @@ contract (obs, info, fail_case, done).
 Output obs is **Stage 1**: shape ``(5, H, W)``
   channels 0-2 : RGB (float32, raw values)
   channel  3   : Depth (float32, raw from VisionSensor, metres)
-  channel  4   : Semantic ID (float32, raw GT integer id)
+  channel  4   : Semantic ID (float32, L3MVN semantic id single-channel)
 
 Dependencies
 ------------
@@ -29,6 +29,7 @@ from envs.igibson.discrete_action_executor import (
 )
 from envs.igibson.obs_adapter import ObsAdapter
 from envs.igibson.semantic_taxonomy import SemanticTaxonomy
+
 
 class _SimAsEnv:
     """Lightweight shim so VisionSensor sees `env.config` and `env.simulator`."""
@@ -83,8 +84,10 @@ class EnvWrapper:
         self._taxonomy = semantic_taxonomy
         self._goal_name = goal_name
         self._goal_cat_id = goal_cat_id
-        self._class_id_to_name = class_id_to_name
+        self._class_id_to_name = class_id_to_name or {}
         self._max_steps: Optional[int] = max_steps
+
+        self._id_to_l3mvn_sem_id = self._build_semantic_lookup(self._class_id_to_name)
 
         self._done: bool = False
         self._clear_flag: int = 0
@@ -202,7 +205,7 @@ class EnvWrapper:
         -------
         rgb : (H, W, 3) uint8
         depth : (H, W) float32   (metres, normalised by depth_high then un-normalised here)
-        semantic : (H, W) int32
+        semantic : (H, W) int32   (L3MVN semantic id space)
         """
         env_shim = _SimAsEnv(self._env, self._vision_sensor.config)
         obs = self._vision_sensor.get_obs(env_shim)
@@ -215,10 +218,18 @@ class EnvWrapper:
         depth_norm = obs["depth"]                  # (H, W, 1) float32
         depth = (depth_norm[:, :, 0] * self._vision_sensor.depth_high).astype(np.float32)
 
-        # semantic: VisionSensor returns (H,W,1) int32 already un-normalised.
-        semantic = obs["seg"][:, :, 0].astype(np.int32)
+        # semantic: VisionSensor returns iGibson class ids.
+        # Convert to L3MVN semantic ids (Stage-1 single-channel id format).
+        semantic_raw = obs["seg"][:, :, 0].astype(np.int32)
+        semantic = np.zeros_like(semantic_raw, dtype=np.int32)
+        for class_id, sem_id in self._id_to_l3mvn_sem_id.items():
+            semantic[semantic_raw == class_id] = sem_id
 
         return rgb, depth, semantic
+
+    def _build_semantic_lookup(self, class_id_to_name: dict[int, str]) -> dict[int, int]:
+        """Build iGibson id -> L3MVN semantic id lookup once per wrapper."""
+        return self._taxonomy.build_id_to_l3mvn_semantic_id(class_id_to_name)
 
     def close(self) -> None:
         """Disconnect / close the underlying iGibson environment or simulator.

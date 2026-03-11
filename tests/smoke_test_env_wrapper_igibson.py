@@ -81,16 +81,30 @@ def summarize_observation(obs: np.ndarray) -> str:
     """Return a one-line diagnostic string for a (5, H, W) Stage-1 obs tensor."""
     rgb = obs[:3]
     depth = obs[3]
-    sem_id = obs[4]
+    sem_id = obs[4].astype(np.int32)
+    uniq = np.unique(sem_id)
     return (
         f"rgb=[{rgb.min():.1f},{rgb.max():.1f},var={rgb.var():.1f}] "
         f"depth=[{depth.min():.2f},{depth.max():.2f},nuniq={len(np.unique(depth))}] "
-        f"sem_id=[min={sem_id.min():.0f},max={sem_id.max():.0f}]"
+        f"sem_id=[min={sem_id.min()},max={sem_id.max()},nuniq={len(uniq)}]"
     )
 
 
-def assert_nonempty_stage1_observation(obs: np.ndarray) -> None:
-    """Assert that rgb/depth/semantic_id channels are not blank (Stage 1)."""
+def _allowed_l3mvn_semantic_ids(class_id_to_name: dict[int, str]) -> set[int]:
+    """Semantic IDs that may appear after taxonomy remap."""
+    mapped = {
+        SemanticTaxonomy.map_class_name_to_l3mvn_semantic_id(name)
+        for name in class_id_to_name.values()
+    }
+    mapped.add(0)
+    return mapped
+
+
+def assert_stage1_observation_contract(
+    obs: np.ndarray,
+    class_id_to_name: dict[int, str],
+) -> None:
+    """Assert Stage-1 contract: non-empty + L3MVN semantic-id format."""
     rgb = obs[:3]
     depth = obs[3]
     sem_id = obs[4]
@@ -102,8 +116,18 @@ def assert_nonempty_stage1_observation(obs: np.ndarray) -> None:
     # Depth: not all identical
     assert len(np.unique(depth)) > 1, "Depth block is a single uniform value"
 
-    # Semantic ID: at least one non-negative integer id
-    assert sem_id.max() >= 0, "Semantic ID block has no valid ids"
+    # Semantic ID: L3MVN id space (0..15), integer-valued.
+    sem_id_i32 = sem_id.astype(np.int32)
+    np.testing.assert_array_equal(sem_id, sem_id_i32.astype(np.float32))
+    assert sem_id_i32.min() >= 0, f"Semantic ID has negative values: {sem_id_i32.min()}"
+    assert sem_id_i32.max() <= 15, f"Semantic ID exceeds L3MVN range: {sem_id_i32.max()}"
+
+    allowed = _allowed_l3mvn_semantic_ids(class_id_to_name)
+    uniq = set(np.unique(sem_id_i32).tolist())
+    assert uniq.issubset(allowed), (
+        f"Unexpected semantic IDs found: {sorted(uniq - allowed)}; "
+        f"allowed subset example: {sorted(list(allowed))[:16]}"
+    )
 
 
 def _build_class_id_to_name() -> dict[int, str]:
@@ -225,8 +249,8 @@ def main():
     assert obs.dtype == np.float32
     print("  [PASS] reset obs shape & dtype")
 
-    assert_nonempty_stage1_observation(obs)
-    print("  [PASS] reset observation is non-empty")
+    assert_stage1_observation_contract(obs, class_id_to_name)
+    print("  [PASS] reset observation satisfies Stage-1 contract (L3MVN semantic-id)")
 
     # ---- 5. Action sequence ----
     print(f"\n[5] Running action sequence: {[ACTION_NAMES[a] for a in ACTION_SEQUENCE]}")
@@ -266,14 +290,10 @@ def main():
                 f"LOOK action should have zero sensor_pose, got {info['sensor_pose']}"
             )
 
-        # Semantic ID channel (ch4): values must be non-negative
-        sem_id = obs[4]
-        assert sem_id.min() >= 0, f"Semantic ID has negative values: {sem_id.min()}"
-
         # Non-empty observation: check first and last steps
         if step_i == 0 or step_i == len(ACTION_SEQUENCE) - 1:
-            assert_nonempty_stage1_observation(obs)
-            print(f"       [PASS] step {step_i} observation is non-empty")
+            assert_stage1_observation_contract(obs, class_id_to_name)
+            print(f"       [PASS] step {step_i} observation satisfies Stage-1 contract")
 
         # Let physics settle
         for _ in range(SIM_STEPS_PER_ACTION):
