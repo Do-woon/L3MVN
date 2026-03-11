@@ -1,4 +1,4 @@
-# L3MVN → iGibson Porting Notes (Interface Inventory) — v1.1
+# L3MVN → iGibson Porting Notes (Interface Inventory) — v1.2
 
 > 업데이트 내용(v1):
 > - TODO#1: planner_inputs 필수 키/shape/type 확정
@@ -11,6 +11,11 @@
 > - remove_small_points의 Goal_score 반환값 문서화
 > - construct_dist의 category_to_id(6개) vs hm3d_category(15개) 구분 명시
 >
+> 업데이트 내용(v1.2 — 최종 규약 통일):
+> - EnvWrapper/SingleEnvVecWrapper 반환 계약을 Stage 1(5ch raw)으로 고정
+> - Stage 2(20ch)는 `Sem_Exp_Env_Agent._preprocess_obs()` 책임으로 명시
+> - Habitat 원본과 동일한 책임 분리를 iGibson 포팅에서도 유지한다고 명시
+>
 > 근거 소스:
 > - planner_inputs 구성: main_llm_zeroshot.py:842-857
 > - sensor_pose 소비: main_llm_zeroshot.py:594-597
@@ -19,14 +24,31 @@
 
 ---
 
-## 1. Env call contract (확정)
+## 1. Env call contract (최종 규약)
 
-### 1.1 reset()
-- `obs, infos = envs.reset()`
-- obs: torch.FloatTensor (VecPyTorch에서 numpy→torch 변환)
-- infos: list[dict] (env 개수 = num_scenes)
+### 1.1 iGibson adapter 반환 계약 (Stage 1)
+- `make_vec_envs(args)`의 iGibson 분기는 **Stage 1 raw obs를 반환하는 env object**를 반환한다.
+- `EnvWrapper.reset()` / `EnvWrapper.plan_act_and_preprocess()`의 obs는 Stage 1 raw obs이다.
+- `SingleEnvVecWrapper`는 batch 차원만 추가하며, obs는 Stage 1 batch obs이다.
+- Stage 1 obs 채널/shape:
+  - single env: `(5, H, W)` = RGB(3) + Depth(1) + SemanticID(1)
+  - single-env batch wrapper: `(1, 5, H, W)`
+- Stage 1에서의 데이터 의미:
+  - depth: raw metres
+  - semantic: semantic id single-channel
+  - one-hot 생성/centimeter 변환은 여기서 수행하지 않는다.
+- Habitat 원본에서도 env는 raw obs를 반환하고, Stage 2는 `Sem_Exp_Env_Agent._preprocess_obs()`가 생성한다.
+- iGibson 포팅에서도 같은 책임 분리를 유지한다.
 
-### 1.2 plan_act_and_preprocess()
+### 1.2 L3MVN preprocessing 이후 계약 (Stage 2)
+- `Sem_Exp_Env_Agent._preprocess_obs()`가 Stage 1을 받아 Stage 2를 생성한다.
+- Stage 2 obs 채널: RGB(3) + Depth(1) + Semantic one-hot(16) = 20ch
+- Stage 2에서 수행되는 전처리:
+  - depth 전처리 및 cm 변환
+  - semantic id -> 16채널 one-hot 변환
+- `Semantic_Mapping` 입력 계약 `(N, 20, H, W)`는 adapter 출력이 아니라 `_preprocess_obs()` 결과 기준이다.
+
+### 1.3 plan_act_and_preprocess() 반환값
 - `obs, fail_case, done, infos = envs.plan_act_and_preprocess(planner_inputs)` (main_llm_zeroshot.py:860)
 - reward 대신 **fail_case**가 반환됨(zeroshot 루프)
   - `fail_case`: dict `{'collision': int, 'success': int, 'detection': int, 'exploration': int}` (agents/sem_exp.py:76-80)
@@ -208,6 +230,7 @@ def forward(self, obs, pose_obs, maps_last, poses_last, eve_angle):
 
 **인자:**
 - `obs`: (N, C, H, W) where C=20. ch3=depth(cm), ch4..19=semantic one-hot(16ch)
+  - 이 `obs`는 iGibson adapter raw obs가 아니라, `Sem_Exp_Env_Agent._preprocess_obs()` 이후 Stage 2 텐서임.
 - `pose_obs`: (N, 3) — infos['sensor_pose']에서 추출한 [dx, dy, do]
 - `maps_last`: (N, nc, local_w, local_h) — 이전 local_map (nc=20)
 - `poses_last`: (N, 3) — 이전 local_pose [x, y, o]
