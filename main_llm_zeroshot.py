@@ -35,7 +35,6 @@ from model import Semantic_Mapping, FeedforwardNet
 from envs.utils.fmm_planner import FMMPlanner
 from envs import make_vec_envs
 from arguments import get_args
-import algo
 
 from constants import category_to_id, hm3d_category, category_to_id_gibson
 
@@ -59,10 +58,86 @@ def find_big_connect(image):
             tmp_area = props[i].area 
     
     return resMatrix
-    
+
+
+def _to_numpy_obs(obs):
+    if torch.is_tensor(obs):
+        return obs.detach().cpu().numpy()
+    return np.asarray(obs)
+
+
+def _build_preprocess_obs_callable(args):
+    import types
+    from PIL import Image
+    from torchvision import transforms
+    from agents.sem_exp import Sem_Exp_Env_Agent
+
+    preprocess_args = types.SimpleNamespace(**vars(args))
+    # Keep Stage-1 spatial size as-is for the Stage1->Stage2 bridge.
+    preprocess_args.env_frame_width = preprocess_args.frame_width
+
+    agent_stub = object.__new__(Sem_Exp_Env_Agent)
+    agent_stub.args = preprocess_args
+    agent_stub.rgb_vis = None
+    agent_stub.res = transforms.Compose(
+        [
+            transforms.ToPILImage(),
+            transforms.Resize(
+                (preprocess_args.frame_height, preprocess_args.frame_width),
+                interpolation=Image.NEAREST,
+            ),
+        ]
+    )
+
+    def _preprocess_single(obs_stage1_single):
+        return Sem_Exp_Env_Agent._preprocess_obs(agent_stub, obs_stage1_single)
+
+    return _preprocess_single
+
+
+def _preprocess_stage1_batch(obs_stage1_batch, preprocess_single):
+    obs_stage1_np = _to_numpy_obs(obs_stage1_batch).astype(np.float32, copy=False)
+    assert obs_stage1_np.ndim == 4 and obs_stage1_np.shape[1] == 5, (
+        f"Stage1 obs must be (N,5,H,W), got {obs_stage1_np.shape}"
+    )
+    obs_stage2_np = np.stack(
+        [preprocess_single(obs_stage1_np[i]) for i in range(obs_stage1_np.shape[0])],
+        axis=0,
+    ).astype(np.float32, copy=False)
+    return obs_stage2_np
+
+
+def _obs_batch_to_torch(obs_batch, device):
+    if torch.is_tensor(obs_batch):
+        return obs_batch.float().to(device)
+    return torch.from_numpy(np.asarray(obs_batch)).float().to(device)
+
+
+def _maybe_preprocess_obs_batch(args, obs, infos, preprocess_single):
+    raw_obs_np = _to_numpy_obs(obs).astype(np.float32, copy=False)
+    assert raw_obs_np.ndim == 4, f"obs must be 4-D (N,C,H,W), got {raw_obs_np.shape}"
+    assert len(infos) == raw_obs_np.shape[0], (
+        f"infos length mismatch: obs batch={raw_obs_np.shape[0]}, len(infos)={len(infos)}"
+    )
+
+    stage2_channels = int(args.num_sem_categories) + 4
+    if raw_obs_np.shape[1] == 5:
+        assert preprocess_single is not None, (
+            "Stage1 obs detected but preprocess bridge is unavailable."
+        )
+        return _preprocess_stage1_batch(raw_obs_np, preprocess_single)
+
+    if raw_obs_np.shape[1] == stage2_channels:
+        return obs
+
+    raise AssertionError(
+        f"Unsupported obs channel count: expected 5(Stage1) or {stage2_channels}(Stage2), got {raw_obs_np.shape[1]}"
+    )
+
 
 def main():
     args = get_args()
+    args.num_sem_categories = int(args.num_sem_categories)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -124,6 +199,7 @@ def main():
 
     # Starting environments
     torch.set_num_threads(1)
+    preprocess_single = _build_preprocess_obs_callable(args) if int(getattr(args, "use_igibson", 0)) == 1 else None
     envs = make_vec_envs(args)
     obs, infos = envs.reset()
 
@@ -136,7 +212,7 @@ def main():
     # 3. Current Agent Location
     # 4. Past Agent Locations
     # 5,6,7,.. : Semantic Categories
-    nc = args.num_sem_categories + 4  # num channels
+    nc = int(args.num_sem_categories) + 4  # num channels
 
     # Calculating full and local map sizes
     map_size = args.map_size_cm // args.map_resolution
@@ -504,6 +580,9 @@ def main():
     sem_map_module.eval()
 
 
+    obs_for_map = _maybe_preprocess_obs_batch(args, obs, infos, preprocess_single)
+    obs = _obs_batch_to_torch(obs_for_map, device)
+
     # Predict semantic map from frame 1
     poses = torch.from_numpy(np.asarray(
         [infos[env_idx]['sensor_pose'] for env_idx in range(num_scenes)])
@@ -549,7 +628,7 @@ def main():
             p_input['sem_map_pred'] = local_map[e, 4:, :, :
                                                 ].argmax(0).cpu().numpy()
 
-    obs, _, done, infos = envs.plan_act_and_preprocess(planner_inputs)
+    obs, fail_case, done, infos = envs.plan_act_and_preprocess(planner_inputs)
 
     start = time.time()
     g_reward = 0
@@ -591,6 +670,9 @@ def main():
 
         # ------------------------------------------------------------------
         # Semantic Mapping Module
+        obs_for_map = _maybe_preprocess_obs_batch(args, obs, infos, preprocess_single)
+        obs = _obs_batch_to_torch(obs_for_map, device)
+
         poses = torch.from_numpy(np.asarray(
             [infos[env_idx]['sensor_pose'] for env_idx
              in range(num_scenes)])
@@ -855,7 +937,6 @@ def main():
                 local_map[e, -1, :, :] = 1e-5
                 p_input['sem_map_pred'] = local_map[e, 4:, :,
                                                 :].argmax(0).cpu().numpy()
-   
 
         obs, fail_case, done, infos = envs.plan_act_and_preprocess(planner_inputs)
         # ------------------------------------------------------------------
@@ -922,7 +1003,6 @@ def main():
             print(log)
             logging.info(log)
         # ------------------------------------------------------------------
-
 
     # Print and save model performance numbers during evaluation
     if args.eval:

@@ -134,7 +134,7 @@ def get_args():
                         help="Object goal reward coefficient")
     parser.add_argument('--intrinsic_rew_coeff', type=float, default=0.05,
                         help="intrinsic exploration reward coefficient")
-    parser.add_argument('--num_sem_categories', type=float, default=16)
+    parser.add_argument('--num_sem_categories', type=int, default=16)
     parser.add_argument('--sem_pred_prob_thr', type=float, default=0.9,
                         help="Semantic prediction confidence threshold")
 
@@ -161,7 +161,6 @@ def get_args():
                         help='L3MVN goal object name for iGibson episodes')
     parser.add_argument('--goal_cat_id', type=int, default=1,
                         help='L3MVN goal category index (1-15) for iGibson')
-
     # train_se_frontier
     parser.add_argument('--train_se_f', type=int, default=0)
     parser.add_argument('--load_se_edge', type=str, default="0",
