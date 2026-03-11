@@ -8,16 +8,28 @@ from torchvision import transforms
 import time
 
 from envs.utils.fmm_planner import FMMPlanner
-from envs.habitat.objectgoal_env import ObjectGoal_Env
-from envs.habitat.objectgoal_env21 import ObjectGoal_Env21
-from agents.utils.semantic_prediction import SemanticPredMaskRCNN
 from constants import color_palette
 import envs.utils.pose as pu
 import agents.utils.visualization as vu
 
-from RedNet.RedNet_model import load_rednet
 from constants import mp_categories_mapping
 import torch
+
+try:
+    from envs.habitat.objectgoal_env import ObjectGoal_Env
+    from envs.habitat.objectgoal_env21 import ObjectGoal_Env21
+except Exception:
+    # Habitat is optional for non-environment utility paths (e.g. preprocess smoke tests).
+    # Keep Sem_Exp_Env_Agent importable without habitat, but block full init at runtime.
+    class _HabitatMissingBase:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "Habitat dependency is unavailable. "
+                "Sem_Exp_Env_Agent full initialization requires habitat."
+            )
+
+    ObjectGoal_Env = _HabitatMissingBase
+    ObjectGoal_Env21 = _HabitatMissingBase
 
 
 class Sem_Exp_Env_Agent(ObjectGoal_Env21):
@@ -42,6 +54,11 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
             args.sem_gpu_id = config_env.SIMULATOR.HABITAT_SIM_V0.GPU_DEVICE_ID
 
         self.device = args.device
+        # Lazy imports keep module import lightweight and avoid requiring these
+        # dependencies unless full Sem_Exp_Env_Agent runtime is used.
+        from agents.utils.semantic_prediction import SemanticPredMaskRCNN
+        from RedNet.RedNet_model import load_rednet
+
         self.sem_pred = SemanticPredMaskRCNN(args)
         self.red_sem_pred = load_rednet(
             self.device, ckpt='RedNet/model/rednet_semmap_mp3d_40.pth', resize=True, # since we train on half-vision
@@ -550,5 +567,4 @@ class Sem_Exp_Env_Agent(ObjectGoal_Env21):
                 dump_dir, self.rank, self.episode_no,
                 self.rank, self.episode_no, self.timestep)
             cv2.imwrite(fn, self.vis_image)
-
 

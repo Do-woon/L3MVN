@@ -17,8 +17,6 @@ except ImportError:
     VectorEnv = None
     make_dataset = None
 
-from agents.sem_exp import Sem_Exp_Env_Agent
-
 try:
     from .objectgoal_env import ObjectGoal_Env
     from .objectgoal_env21 import ObjectGoal_Env21
@@ -36,6 +34,9 @@ def make_env_fn(args, config_env, rank):
     config_env.freeze()
 
     if args.agent == "sem_exp":
+        # Lazy import avoids a circular import:
+        # agents.sem_exp -> envs.habitat.objectgoal_env -> envs.habitat.__init__
+        from agents.sem_exp import Sem_Exp_Env_Agent
         env = Sem_Exp_Env_Agent(args=args, rank=rank,
                                 config_env=config_env,
                                 dataset=dataset
