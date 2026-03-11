@@ -16,7 +16,7 @@ Output contracts
     - ``infos_list``      : ``list[dict]``, length 1
 
 ``planner_inputs`` may be
-    - a single ``dict``      (e.g. ``{"action": 1, ...}``)
+    - a single ``dict``      (canonical 8-key planner_inputs)
     - a length-1 ``list[dict]``
 
 The inner ``EnvWrapper`` still produces **Stage 1** obs ``(5, H, W)``.
@@ -70,8 +70,8 @@ class SingleEnvVecWrapper:
         Parameters
         ----------
         planner_inputs : dict or list[dict]
-            A single dict or a length-1 list of dicts, each containing at
-            least ``{"action": int}``.
+            A single dict or a length-1 list of dicts.
+            Canonical path uses Habitat-style 8-key planner_inputs.
 
         Returns
         -------

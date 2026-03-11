@@ -73,6 +73,21 @@ ACTION_SEQUENCE = [
 SIM_STEPS_PER_ACTION = 5
 
 
+def _make_dummy_planner_inputs(m: int = 80) -> dict:
+    goal = np.zeros((m, m), dtype=np.float32)
+    goal[m // 2, m // 2] = 1.0
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": goal,
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": False,
+        "found_goal": 0,
+        "wait": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Observation validation helpers
 # ---------------------------------------------------------------------------
@@ -263,8 +278,9 @@ def main():
     print("-" * len(header))
 
     for step_i, action_id in enumerate(ACTION_SEQUENCE):
+        wrapper._plan = lambda _planner_inputs, _a=action_id: _a
         obs, fail_case, done, info = wrapper.plan_act_and_preprocess(
-            {"action": action_id}
+            _make_dummy_planner_inputs()
         )
 
         sp = info["sensor_pose"]

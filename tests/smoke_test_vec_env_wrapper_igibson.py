@@ -85,6 +85,21 @@ REQUIRED_INFO_KEYS = ("sensor_pose", "eve_angle", "goal_cat_id", "goal_name", "c
 REQUIRED_FAIL_CASE_KEYS = ("collision", "success", "detection", "exploration")
 
 
+def _make_dummy_planner_inputs(m: int = 80) -> dict:
+    goal = np.zeros((m, m), dtype=np.float32)
+    goal[m // 2, m // 2] = 1.0
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": goal,
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": False,
+        "found_goal": 0,
+        "wait": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Observation validation helpers (Stage 1)
 # ---------------------------------------------------------------------------
@@ -315,8 +330,9 @@ def main(save_obs: bool = False, out_dir: str = "./smoke_obs_out"):
     print("-" * len(header))
 
     for step_i, action_id in enumerate(ACTION_SEQUENCE):
+        inner_wrapper._plan = lambda _planner_inputs, _a=action_id: _a
         obs_batch, fail_case_batch, done_batch, infos_list = (
-            vec_env.plan_act_and_preprocess({"action": action_id})
+            vec_env.plan_act_and_preprocess(_make_dummy_planner_inputs())
         )
 
         sp = infos_list[0]["sensor_pose"]
@@ -365,8 +381,9 @@ def main(save_obs: bool = False, out_dir: str = "./smoke_obs_out"):
     # ---- 6. Quick check: list[dict] input form ----
     print("\n[5b] Quick check: list[dict] planner_inputs form ...")
     vec_env.reset()
+    inner_wrapper._plan = lambda _planner_inputs: ACTION_FORWARD
     obs_b2, fc_b2, done_b2, info_b2 = vec_env.plan_act_and_preprocess(
-        [{"action": ACTION_FORWARD}]
+        [_make_dummy_planner_inputs()]
     )
     assert obs_b2.shape == (1, 5, 120, 160)
     assert len(fc_b2) == 1

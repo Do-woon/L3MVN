@@ -42,6 +42,19 @@ def _make_fail_case(collision: int = 0) -> dict:
     return {"collision": collision, "success": 0, "detection": 0, "exploration": 0}
 
 
+def _make_planner_inputs(m: int = H) -> dict:
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": np.zeros((m, m), dtype=np.float32),
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": False,
+        "found_goal": 0,
+        "wait": False,
+    }
+
+
 def _build_vec_wrapper(
     reset_obs=None,
     reset_info=None,
@@ -112,7 +125,7 @@ class TestStepSingleDict:
     def _step(self):
         vec = _build_vec_wrapper()
         vec.reset()
-        return vec.plan_act_and_preprocess({"action": 1})
+        return vec.plan_act_and_preprocess(_make_planner_inputs())
 
     def test_obs_batch_shape(self):
         obs_batch, _, _, _ = self._step()
@@ -143,8 +156,10 @@ class TestStepSingleDict:
             _make_obs(), _make_fail_case(), False, _make_info()
         )
         vec = SingleEnvVecWrapper(mock_inner)
-        vec.plan_act_and_preprocess({"action": 1})
-        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 1})
+        planner_inputs = _make_planner_inputs()
+        vec.plan_act_and_preprocess(planner_inputs)
+        assert mock_inner.plan_act_and_preprocess.call_count == 1
+        assert mock_inner.plan_act_and_preprocess.call_args[0][0] is planner_inputs
 
 
 # =========================================================================
@@ -159,13 +174,15 @@ class TestStepListOfDict:
             _make_obs(), _make_fail_case(), False, _make_info()
         )
         vec = SingleEnvVecWrapper(mock_inner)
-        vec.plan_act_and_preprocess([{"action": 5}])
+        planner_inputs = _make_planner_inputs()
+        vec.plan_act_and_preprocess([planner_inputs])
         # inner wrapper should receive the unwrapped single dict
-        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 5})
+        assert mock_inner.plan_act_and_preprocess.call_count == 1
+        assert mock_inner.plan_act_and_preprocess.call_args[0][0] is planner_inputs
 
     def test_list_input_obs_shape(self):
         vec = _build_vec_wrapper()
-        obs_batch, _, _, _ = vec.plan_act_and_preprocess([{"action": 2}])
+        obs_batch, _, _, _ = vec.plan_act_and_preprocess([_make_planner_inputs()])
         assert obs_batch.shape == (1, 5, H, W)
 
     def test_tuple_input_unwrapped(self):
@@ -175,18 +192,20 @@ class TestStepListOfDict:
             _make_obs(), _make_fail_case(), False, _make_info()
         )
         vec = SingleEnvVecWrapper(mock_inner)
-        vec.plan_act_and_preprocess(({"action": 3},))
-        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 3})
+        planner_inputs = _make_planner_inputs()
+        vec.plan_act_and_preprocess((planner_inputs,))
+        assert mock_inner.plan_act_and_preprocess.call_count == 1
+        assert mock_inner.plan_act_and_preprocess.call_args[0][0] is planner_inputs
 
     def test_list_len_gt_one_raises(self):
         vec = _build_vec_wrapper()
         with pytest.raises(ValueError):
-            vec.plan_act_and_preprocess([{"action": 1}, {"action": 2}])
+            vec.plan_act_and_preprocess([_make_planner_inputs(), _make_planner_inputs()])
 
     def test_tuple_len_gt_one_raises(self):
         vec = _build_vec_wrapper()
         with pytest.raises(ValueError):
-            vec.plan_act_and_preprocess(({"action": 1}, {"action": 2}))
+            vec.plan_act_and_preprocess((_make_planner_inputs(), _make_planner_inputs()))
 
 
 # =========================================================================
@@ -197,21 +216,21 @@ class TestDoneWrapping:
     def test_done_true_wrapped(self):
         vec = _build_vec_wrapper(step_done=True)
         vec.reset()
-        _, _, done_batch, _ = vec.plan_act_and_preprocess({"action": 0})
+        _, _, done_batch, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         assert len(done_batch) == 1
         assert bool(done_batch[0]) is True
 
     def test_done_false_wrapped(self):
         vec = _build_vec_wrapper(step_done=False)
         vec.reset()
-        _, _, done_batch, _ = vec.plan_act_and_preprocess({"action": 1})
+        _, _, done_batch, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         assert len(done_batch) == 1
         assert bool(done_batch[0]) is False
 
     def test_done_is_numpy_array(self):
         vec = _build_vec_wrapper(step_done=True)
         vec.reset()
-        _, _, done_batch, _ = vec.plan_act_and_preprocess({"action": 0})
+        _, _, done_batch, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         assert isinstance(done_batch, np.ndarray)
         assert done_batch.dtype == bool
 
@@ -232,7 +251,7 @@ class TestInfoPassthrough:
         info = _make_info({"collision": 0})
         vec = _build_vec_wrapper(step_info=info)
         vec.reset()
-        _, _, _, infos_list = vec.plan_act_and_preprocess({"action": 1})
+        _, _, _, infos_list = vec.plan_act_and_preprocess(_make_planner_inputs())
         for key in REQUIRED_INFO_KEYS:
             assert key in infos_list[0], f"Missing key in step info: {key}"
 
@@ -253,20 +272,20 @@ class TestFailCasePassthrough:
     def test_required_keys_present(self):
         vec = _build_vec_wrapper(step_fail_case=_make_fail_case(collision=1))
         vec.reset()
-        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess({"action": 1})
+        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         for key in REQUIRED_FAIL_CASE_KEYS:
             assert key in fail_case_batch[0], f"Missing key: {key}"
 
     def test_collision_value_preserved(self):
         vec = _build_vec_wrapper(step_fail_case=_make_fail_case(collision=1))
         vec.reset()
-        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess({"action": 1})
+        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         assert fail_case_batch[0]["collision"] == 1
 
     def test_no_collision(self):
         vec = _build_vec_wrapper(step_fail_case=_make_fail_case(collision=0))
         vec.reset()
-        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess({"action": 1})
+        _, fail_case_batch, _, _ = vec.plan_act_and_preprocess(_make_planner_inputs())
         assert fail_case_batch[0]["collision"] == 0
 
 
@@ -293,14 +312,16 @@ class TestAsyncStepCompatibility:
         )
         vec = SingleEnvVecWrapper(mock_inner)
 
-        vec.step_async({"action": 1})
+        planner_inputs = _make_planner_inputs()
+        vec.step_async(planner_inputs)
         obs_batch, fail_case_batch, done_batch, infos_list = vec.step_wait()
 
         assert obs_batch.shape == (1, 5, H, W)
         assert len(fail_case_batch) == 1
         assert len(done_batch) == 1
         assert len(infos_list) == 1
-        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 1})
+        assert mock_inner.plan_act_and_preprocess.call_count == 1
+        assert mock_inner.plan_act_and_preprocess.call_args[0][0] is planner_inputs
 
     def test_step_wait_without_async_raises(self):
         vec = _build_vec_wrapper()
@@ -315,5 +336,7 @@ class TestAsyncStepCompatibility:
         )
         vec = SingleEnvVecWrapper(mock_inner)
 
-        vec.step({"action": 5})
-        mock_inner.plan_act_and_preprocess.assert_called_once_with({"action": 5})
+        planner_inputs = _make_planner_inputs()
+        vec.step(planner_inputs)
+        assert mock_inner.plan_act_and_preprocess.call_count == 1
+        assert mock_inner.plan_act_and_preprocess.call_args[0][0] is planner_inputs

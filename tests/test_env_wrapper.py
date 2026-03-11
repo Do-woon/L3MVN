@@ -129,6 +129,24 @@ def _build_wrapper(executor=None, max_steps=500, class_id_to_name=None) -> EnvWr
     )
 
 
+def _make_planner_inputs(m: int = H, *, wait: bool = False, new_goal: bool = False, found_goal: int = 0) -> dict:
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": np.zeros((m, m), dtype=np.float32),
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": bool(new_goal),
+        "found_goal": int(found_goal),
+        "wait": bool(wait),
+    }
+
+
+def _step_with_action(w: EnvWrapper, action_id: int):
+    w._plan = lambda _planner_inputs: action_id
+    return w.plan_act_and_preprocess(_make_planner_inputs())
+
+
 # =========================================================================
 # Test 1: reset happy path
 # =========================================================================
@@ -175,26 +193,26 @@ class TestForwardStep:
     def test_obs_shape(self):
         w = _build_wrapper()
         w.reset()
-        obs, fail_case, done, info = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        obs, fail_case, done, info = _step_with_action(w, ACTION_FORWARD)
         assert obs.shape == (5, H, W)
 
     def test_fail_case_keys(self):
         w = _build_wrapper()
         w.reset()
-        _, fail_case, _, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, fail_case, _, _ = _step_with_action(w, ACTION_FORWARD)
         for key in ("collision", "success", "detection", "exploration"):
             assert key in fail_case
 
     def test_info_has_collision(self):
         w = _build_wrapper()
         w.reset()
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, _, _, info = _step_with_action(w, ACTION_FORWARD)
         assert "collision" in info
 
     def test_not_done(self):
         w = _build_wrapper()
         w.reset()
-        _, _, done, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, _, done, _ = _step_with_action(w, ACTION_FORWARD)
         assert done is False
 
 
@@ -206,13 +224,13 @@ class TestLookDownStep:
     def test_sensor_pose_zero(self):
         w = _build_wrapper()
         w.reset()
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
+        _, _, _, info = _step_with_action(w, ACTION_LOOK_DOWN)
         assert info["sensor_pose"] == [0.0, 0.0, 0.0]
 
     def test_eve_angle_decremented(self):
         w = _build_wrapper()
         w.reset()
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
+        _, _, _, info = _step_with_action(w, ACTION_LOOK_DOWN)
         assert info["eve_angle"] == -30
 
 
@@ -225,7 +243,7 @@ class TestLookDownClamp:
         w = _build_wrapper()
         w.reset()
         for _ in range(5):
-            _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
+            _, _, _, info = _step_with_action(w, ACTION_LOOK_DOWN)
         assert info["eve_angle"] == -60
 
 
@@ -238,18 +256,18 @@ class TestLookUpRecovery:
         w = _build_wrapper()
         w.reset()
         # Go down twice → -60
-        w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
-        w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
+        _step_with_action(w, ACTION_LOOK_DOWN)
+        _step_with_action(w, ACTION_LOOK_DOWN)
         # Come up once → -30
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_LOOK_UP})
+        _, _, _, info = _step_with_action(w, ACTION_LOOK_UP)
         assert info["eve_angle"] == -30
 
     def test_recovery_fully(self):
         w = _build_wrapper()
         w.reset()
-        w.plan_act_and_preprocess({"action": ACTION_LOOK_DOWN})
-        w.plan_act_and_preprocess({"action": ACTION_LOOK_UP})
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_LOOK_UP})
+        _step_with_action(w, ACTION_LOOK_DOWN)
+        _step_with_action(w, ACTION_LOOK_UP)
+        _, _, _, info = _step_with_action(w, ACTION_LOOK_UP)
         # Started at 0, down→-30, up→0, up→0 (clamped)
         assert info["eve_angle"] == 0
 
@@ -312,13 +330,13 @@ class TestDoneInfoKeys:
     def test_done_on_stop(self):
         w = _build_wrapper()
         w.reset()
-        _, _, done, info = w.plan_act_and_preprocess({"action": ACTION_STOP})
+        _, _, done, info = _step_with_action(w, ACTION_STOP)
         assert done is True
 
     def test_done_info_contains_metrics(self):
         w = _build_wrapper()
         w.reset()
-        _, _, _, info = w.plan_act_and_preprocess({"action": ACTION_STOP})
+        _, _, _, info = _step_with_action(w, ACTION_STOP)
         for key in ("spl", "success", "distance_to_goal"):
             assert key in info, f"missing key on done: {key}"
 
@@ -333,7 +351,7 @@ class TestCollisionPropagation:
         executor.last_collision = True
         w = _build_wrapper(executor=executor)
         w.reset()
-        _, fail_case, _, info = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, fail_case, _, info = _step_with_action(w, ACTION_FORWARD)
         assert fail_case["collision"] == 1
         assert info["collision"] == 1
 
@@ -342,7 +360,7 @@ class TestCollisionPropagation:
         executor.last_collision = False
         w = _build_wrapper(executor=executor)
         w.reset()
-        _, fail_case, _, info = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, fail_case, _, info = _step_with_action(w, ACTION_FORWARD)
         assert fail_case["collision"] == 0
         assert info["collision"] == 0
 
@@ -356,26 +374,26 @@ class TestCheckDone:
         w = _build_wrapper(max_steps=3)
         w.reset()
         for _ in range(2):
-            _, _, done, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+            _, _, done, _ = _step_with_action(w, ACTION_FORWARD)
             assert done is False
-        _, _, done, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, _, done, _ = _step_with_action(w, ACTION_FORWARD)
         assert done is True
 
     def test_no_limit_when_none(self):
         w = _build_wrapper(max_steps=None)
         w.reset()
         for _ in range(20):
-            _, _, done, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+            _, _, done, _ = _step_with_action(w, ACTION_FORWARD)
             assert done is False
 
     def test_reset_clears_step_count(self):
         w = _build_wrapper(max_steps=2)
         w.reset()
-        w.plan_act_and_preprocess({"action": ACTION_FORWARD})
-        w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _step_with_action(w, ACTION_FORWARD)
+        _step_with_action(w, ACTION_FORWARD)
         # After reset, step count should be back to 0
         w.reset()
-        _, _, done, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        _, _, done, _ = _step_with_action(w, ACTION_FORWARD)
         assert done is False
 
 
@@ -406,6 +424,54 @@ class TestPreprocessDepth:
         """plan_act_and_preprocess also returns (5,H,W) Stage-1 obs."""
         w = _build_wrapper()
         w.reset()
-        obs, _, _, _ = w.plan_act_and_preprocess({"action": ACTION_FORWARD})
+        obs, _, _, _ = _step_with_action(w, ACTION_FORWARD)
         assert obs.shape == (5, H, W)
         assert obs.dtype == np.float32
+
+
+# =========================================================================
+# Test 11: planner_inputs contract (8-key canonical)
+# =========================================================================
+
+class TestPlannerInputsContract:
+    def test_8key_path_resolves_action_via_internal_plan(self, monkeypatch):
+        w = _build_wrapper()
+        w.reset()
+
+        monkeypatch.setattr(w, "_plan", lambda _p: ACTION_FORWARD)
+        planner_inputs = {
+            "map_pred": np.zeros((H, W), dtype=np.float32),
+            "exp_pred": np.ones((H, W), dtype=np.float32),
+            "pose_pred": np.array([0, 0, 0, 0, H, 0, W], dtype=np.float32),
+            "goal": np.zeros((H, W), dtype=np.float32),
+            "map_target": np.zeros((H, W), dtype=np.float32),
+            "new_goal": False,
+            "found_goal": 0,
+            "wait": False,
+        }
+        _, _, done, info = w.plan_act_and_preprocess(planner_inputs)
+        assert done is False
+        assert info["collision"] in (0, 1)
+
+    def test_8key_path_runs_with_real_planner(self):
+        w = _build_wrapper()
+        w.reset()
+
+        m = 40
+        goal = np.zeros((m, m), dtype=np.float32)
+        goal[20, 20] = 1.0
+        planner_inputs = {
+            "map_pred": np.zeros((m, m), dtype=np.float32),
+            "exp_pred": np.ones((m, m), dtype=np.float32),
+            "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+            "goal": goal,
+            "map_target": np.zeros((m, m), dtype=np.float32),
+            "new_goal": False,
+            "found_goal": 0,
+            "wait": False,
+        }
+        obs, fail_case, done, info = w.plan_act_and_preprocess(planner_inputs)
+        assert obs.shape == (5, H, W)
+        assert done in (True, False)
+        assert set(fail_case.keys()) == {"collision", "success", "detection", "exploration"}
+        assert "sensor_pose" in info

@@ -205,6 +205,7 @@ def _make_igibson_vec_envs(args):
         goal_cat_id=goal_cat_id,
         class_id_to_name=class_id_to_name,
         max_steps=max_steps,
+        args=args,
     )
 
     return SingleEnvVecWrapper(inner_wrapper)

@@ -46,6 +46,21 @@ SEMANTIC_ID_TO_NAME = {v: k for k, v in L3MVN_CATEGORY_TO_ID.items()}
 SEMANTIC_ID_TO_NAME[0] = "background_or_unmapped"
 SEMANTIC_ID_TO_NAME[16] = "extra_channel_reserved"
 
+
+def _make_dummy_planner_inputs(m: int = 80) -> dict:
+    goal = np.zeros((m, m), dtype=np.float32)
+    goal[m // 2, m // 2] = 1.0
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": goal,
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": False,
+        "found_goal": 0,
+        "wait": False,
+    }
+
 def _build_preprocess_callable(args):
     """Build callable that directly invokes real Sem_Exp_Env_Agent._preprocess_obs."""
     try:
@@ -270,9 +285,9 @@ def main():
         obs_stage2 = preprocess_obs_fn(obs0)
         _validate_stage2("reset", obs0, obs_stage2, args)
 
-        print("\n[3] action=1 (FORWARD) Stage1 capture ...")
+        print("\n[3] 8-key planner_inputs Stage1 capture ...")
         obs_stage1_batch, fail_case_batch, done_batch, infos = envs.plan_act_and_preprocess(
-            [{"action": 1}]
+            [_make_dummy_planner_inputs()]
         )
         assert isinstance(fail_case_batch, list) and len(fail_case_batch) == 1
         for k in REQUIRED_FAIL_CASE_KEYS:
@@ -284,11 +299,11 @@ def main():
 
         _assert_stage1_batch_contract(obs_stage1_batch, infos, args)
         obs1 = obs_stage1_batch[0]
-        _assert_stage1_single_contract(obs1, "step_action_1")
-        _print_stage1_semantic_distribution(obs1, "step_action_1")
+        _assert_stage1_single_contract(obs1, "step_planner")
+        _print_stage1_semantic_distribution(obs1, "step_planner")
 
         obs_stage2_step = preprocess_obs_fn(obs1)
-        _validate_stage2("step_action_1", obs1, obs_stage2_step, args)
+        _validate_stage2("step_planner", obs1, obs_stage2_step, args)
 
         print("\n" + "=" * 72)
         print(f"ALL ASSERTIONS PASSED (preprocess mode: {preprocess_mode})")

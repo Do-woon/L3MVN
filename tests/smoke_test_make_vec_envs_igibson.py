@@ -48,6 +48,21 @@ ACTION_SEQUENCE = [1, 2, 3, 4, 5] * 10  # FORWARD, TURN_LEFT, TURN_RIGHT, LOOK_U
 ACTION_NAMES = {1: "FORWARD", 2: "TURN_LEFT", 3: "TURN_RIGHT", 4: "LOOK_UP", 5: "LOOK_DOWN"}
 
 
+def _make_dummy_planner_inputs(m: int = 80) -> dict:
+    goal = np.zeros((m, m), dtype=np.float32)
+    goal[m // 2, m // 2] = 1.0
+    return {
+        "map_pred": np.zeros((m, m), dtype=np.float32),
+        "exp_pred": np.ones((m, m), dtype=np.float32),
+        "pose_pred": np.array([1.0, 1.0, 0.0, 0, m, 0, m], dtype=np.float32),
+        "goal": goal,
+        "map_target": np.zeros((m, m), dtype=np.float32),
+        "new_goal": False,
+        "found_goal": 0,
+        "wait": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Observation validation (Stage 1)
 # ---------------------------------------------------------------------------
@@ -152,6 +167,8 @@ def main():
 
         expected_shape = (1, 5, args.frame_height, args.frame_width)
         sim, scene, robot, class_id_to_name = _unwrap_igibson_handles(envs)
+        inner_wrapper = getattr(envs, "_env", None)
+        assert inner_wrapper is not None, "SingleEnvVecWrapper must expose inner _env"
 
         # ---- 2. Reset ----
         print("\n[2] envs.reset() ...")
@@ -198,8 +215,9 @@ def main():
         print("-" * len(header))
 
         for step_i, action_id in enumerate(ACTION_SEQUENCE):
+            inner_wrapper._plan = lambda _planner_inputs, _a=action_id: _a
             obs, fail_case_batch, done_batch, infos = envs.plan_act_and_preprocess(
-                [{"action": action_id}]
+                [_make_dummy_planner_inputs()]
             )
 
             sp = infos[0]["sensor_pose"]
