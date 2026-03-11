@@ -152,6 +152,16 @@ def get_args():
 
     parser.add_argument('--use_gtsem', type=int, default=0)
 
+    # iGibson backend
+    parser.add_argument('--use_igibson', type=int, default=0,
+                        help='1: use iGibson simulator instead of Habitat')
+    parser.add_argument('--igibson_scene', type=str, default='Rs_int',
+                        help='iGibson scene name (default: Rs_int)')
+    parser.add_argument('--goal_name', type=str, default='chair',
+                        help='L3MVN goal object name for iGibson episodes')
+    parser.add_argument('--goal_cat_id', type=int, default=1,
+                        help='L3MVN goal category index (1-15) for iGibson')
+
     # train_se_frontier
     parser.add_argument('--train_se_f', type=int, default=0)
     parser.add_argument('--load_se_edge', type=str, default="0",
