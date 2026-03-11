@@ -1,100 +1,156 @@
-# L3MVN: Leveraging Large Language Models for Visual Target Navigation
+# L3MVN 실행 가이드 (iGibson 포팅 기준)
 
-This work is based on our paper. We proposed a new framework to explore and search for the target in unknown environment based on Large Language Model. Our work is based on [SemExp](https://github.com/devendrachaplot/Object-Goal-Navigation) and [llm_scene_understanding](https://github.com/neurips2020submission/invalid-action-masking), implemented in PyTorch.
+이 문서는 현재 저장소 기준으로 **실행에 필요한 내용만** 정리합니다.
 
-**Author:** Bangguo Yu, Hamidreza Kasaei and Ming Cao
+## 1. Docker Setup
 
-**Affiliation:** University of Groningen
+### 1-1. 사전 조건
+- NVIDIA GPU + 드라이버
+- Docker / Docker Compose
+- NVIDIA Container Toolkit
+- 호스트 경로 접근 가능
+  - `/mount/nas2`
+  - `/mount/nas3`
 
-## Frontier Semantic Exploration Framework
+### 1-2. Docker 관련 파일
+- `docker-compose.yml`: 개발 컨테이너 실행 설정
+- `docker/Dockerfile`: CUDA/PyTorch/iGibson 기반 이미지 정의
+- `docker/.dockerignore`: 빌드 컨텍스트 제외 파일 설정
 
-Visual target navigation in unknown environments is a crucial problem in robotics. Despite extensive investigation of classical and learning-based approaches in the past, robots lack common-sense knowledge about household objects and layouts. Prior state-of-the-art approaches to this task rely on learning the priors during the training and typically require significant expensive resources and time for  learning. To address this, we propose a new framework for visual target navigation that leverages Large Language Models (LLM) to impart common sense for object searching. Specifically, we introduce two paradigms: (i) zero-shot and (ii) feed-forward approaches that use language to find the relevant frontier from the semantic map as a long-term goal and explore the environment efficiently. Our analysis demonstrates the notable zero-shot generalization and transfer capabilities from the use of language. Experiments on Gibson and Habitat-Matterport 3D (HM3D) demonstrate that the proposed framework significantly outperforms existing map-based methods in terms of success rate and generalization. Ablation analysis also indicates that the common-sense knowledge from the language model leads to more efficient semantic exploration. Finally, we provide a real robot experiment to verify the applicability of our framework in real-world scenarios. The supplementary video and code can be accessed via the following link: https://sites.google.com/view/l3mvn.
+### 1-3. 컨테이너 빌드/실행
+프로젝트 루트에서 실행:
 
-![image-20200706200822807](img/system.png)
-
-<!-- ## Requirements
-
-- Ubuntu 20.04
-- Python 3.7
-- [habitat-lab](https://github.com/facebookresearch/habitat-lab) -->
-
-## Installation
-
-The code has been tested only with Python 3.7 on Ubuntu 20.04.
-
-1. Installing Dependencies
-- We use challenge-2022 versions of [habitat-sim](https://github.com/facebookresearch/habitat-sim) and [habitat-lab](https://github.com/facebookresearch/habitat-lab) as specified below:
-
-- Installing habitat-sim:
-```
-git clone https://github.com/facebookresearch/habitat-sim.git
-cd habitat-sim; git checkout tags/challenge-2022; 
-pip install -r requirements.txt; 
-python setup.py install --headless
-python setup.py install # (for Mac OS)
+```bash
+docker compose build
+docker compose up -d
+docker compose exec l3mvn bash
 ```
 
-- Installing habitat-lab:
-```
-git clone https://github.com/facebookresearch/habitat-lab.git
-cd habitat-lab; git checkout tags/challenge-2022; 
-pip install -e .
-```
+종료:
 
-- Install [pytorch](https://pytorch.org/) according to your system configuration. The code is tested on pytorch v1.7.0 and cudatoolkit v11.4. If you are using conda:
-```
-conda install pytorch==1.7.0 torchvision==0.8.1 cudatoolkit=11.4 #(Linux with GPU)
-conda install pytorch==1.7.0 torchvision==0.8.1 -c pytorch #(Mac OS)
+```bash
+docker compose down
 ```
 
-- Install [detectron2](https://github.com/facebookresearch/detectron2/) according to your system configuration. 
+참고:
+- 컨테이너 작업 디렉토리: `/mount/nas2/users/dukim/vla_ws/L3MVN`
+- iGibson 사용자 설정은 Docker volume `igibson_config`에 저장됨
 
-2. Download HM3D datasets:
+### 1-4. 이미지 기본 스펙
+- Base image: `nvidia/cuda:11.0.3-cudnn8-devel-ubuntu20.04`
+- Python: `3.8`
+- PyTorch: `1.7.0` (CUDA 11.0 wheel)
+- iGibson: `StanfordVL/iGibson` editable 설치
 
-#### Habitat Matterport
-Download [HM3D](https://aihabitat.org/datasets/hm3d/) dataset using download utility and [instructions](https://github.com/facebookresearch/habitat-sim/blob/089f6a41474f5470ca10222197c23693eef3a001/datasets/HM3D.md):
-```
-python -m habitat_sim.utils.datasets_download --username <api-token-id> --password <api-token-secret> --uids hm3d_minival
-```
+---
 
-3. Download additional datasets
+## 2. iGibson Dataset 세팅
 
-Download the [segmentation model](https://drive.google.com/file/d/1U0dS44DIPZ22nTjw0RfO431zV-lMPcvv/view?usp=share_link) in RedNet/model path.
+현재 코드(`envs/__init__.py`)는 기본 경로를 아래처럼 사용합니다.
 
+- `igibson.assets_path`: `/mount/nas2/users/dukim/vla_ws/igibson/data/assets`
+- `igibson.ig_dataset_path`: `/mount/nas2/users/dukim/vla_ws/igibson/data/ig_dataset`
+- `igibson.key_path`: `/mount/nas2/users/dukim/vla_ws/igibson/data/igibson.key`
 
-## Setup
-Clone the repository and install other requirements:
-```
-git clone https://github.com/ybgdgh/L3MVN
-cd L3MVN/
-pip install -r requirements.txt
-```
+즉, 실행 전에 최소 아래 구조가 있어야 합니다.
 
-### Setting up datasets
-The code requires the datasets in a `data` folder in the following format (same as habitat-lab):
-```
-L3MVN/
-  data/
-    scene_datasets/
-    matterport_category_mappings.tsv
-    object_norm_inv_perplexity.npy
-    versioned_data
-    objectgoal_hm3d/
-        train/
-        val/
-        val_mini/
+```text
+/mount/nas2/users/dukim/vla_ws/igibson/data/
+  assets/
+  ig_dataset/
+  igibson.key
 ```
 
+### 2-1. iGibson 설치 확인
+컨테이너 내부에서:
 
-### For evaluation: 
-For evaluating the pre-trained model:
-```
-python main_llm_vis.py --split val --eval 1 --auto_gpu_config 0 \
--n 1 --num_eval_episodes 2000 --load pretrained_models/llm_model.pt \
---use_gtsem 0 --num_local_steps 10
+```bash
+python -c "import igibson; print(igibson.__file__)"
 ```
 
+### 2-2. Assets 다운로드
+공식 문서 기준 명령:
 
-## Demo Video
+```bash
+python -m igibson.utils.assets_utils --download_assets
+```
 
-[video](https://sites.google.com/view/l3mvn)
+### 2-3. iGibson Scene Dataset(ig_dataset) 준비
+공식 가이드(라이선스 폼 제출 후 key 발급)로 진행합니다.
+
+- 발급받은 `igibson.key`를 데이터 루트에 위치
+- `ig_dataset`을 다운로드/압축해제하여 위 경로에 배치
+
+버전에 따라 자동 다운로드 명령이 가능한 경우:
+
+```bash
+python -m igibson.utils.assets_utils --download_ig_dataset
+```
+
+만약 위 명령이 동작하지 않으면, 공식 문서의 안내대로 수동 다운로드/압축해제를 사용하세요.
+
+### 2-4. 빠른 경로 점검
+
+```bash
+ls -al /mount/nas2/users/dukim/vla_ws/igibson/data
+ls -al /mount/nas2/users/dukim/vla_ws/igibson/data/assets | head
+ls -al /mount/nas2/users/dukim/vla_ws/igibson/data/ig_dataset | head
+```
+
+---
+
+## 3. Entry Point 실행 (`main_llm_zeroshot.py`)
+
+### 3-1. 일반 실행 (debug vis 없음)
+
+```bash
+python main_llm_zeroshot.py \
+  --use_igibson 1 \
+  --num_processes 1 \
+  --no_cuda \
+  --use_gtsem 1
+```
+
+### 3-2. Debug Visualization 포함 실행
+
+```bash
+python main_llm_zeroshot.py \
+  --use_igibson 1 \
+  --num_processes 1 \
+  --no_cuda \
+  --use_gtsem 1 \
+  --debug_viz 1 \
+  --debug_viz_dir ./tmp/debug_viz_ig \
+  --debug_viz_every 1
+```
+
+출력 폴더:
+
+```text
+./tmp/debug_viz_ig/
+  obs/
+  maps/local/
+  maps/planner/
+  maps/frontier/
+  meta/
+```
+
+---
+
+## 4. 자주 발생하는 문제
+
+- 데이터셋 경로를 못 찾는 경우:
+  - `envs/__init__.py`의 기본 경로와 실제 파일 위치가 동일한지 확인
+  - 특히 `igibson.key`, `assets`, `ig_dataset` 누락 여부 점검
+
+- 렌더링/X11 문제:
+  - `docker-compose.yml`의 `DISPLAY`, `XAUTHORITY` 설정 확인
+  - 헤드리스로 사용할 경우 iGibson 렌더링 모드 설정을 별도로 점검
+
+---
+
+## 5. 참고 링크
+
+- iGibson 설치 문서: https://stanfordvl.github.io/iGibson/installation.html
+- iGibson 데이터셋 문서: https://stanfordvl.github.io/iGibson/dataset.html
+- iGibson GitHub: https://github.com/StanfordVL/iGibson
