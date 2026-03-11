@@ -220,6 +220,18 @@ class EnvWrapper:
 
         return rgb, depth, semantic
 
+    def close(self) -> None:
+        """Disconnect / close the underlying iGibson environment or simulator.
+
+        Calls ``disconnect()`` if available, falling back to ``close()``.
+        Safe to call if neither method exists.
+        """
+        env = self._env
+        if hasattr(env, "disconnect"):
+            env.disconnect()
+        elif hasattr(env, "close"):
+            env.close()
+
     def _check_goal_reached(
         self,
         semantic_id_map: np.ndarray,
