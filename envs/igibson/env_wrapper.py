@@ -34,7 +34,11 @@ from envs.igibson.discrete_action_executor import (
     DiscreteActionExecutor,
 )
 from envs.igibson.obs_adapter import ObsAdapter
-from envs.igibson.semantic_taxonomy import SemanticTaxonomy
+from envs.igibson.semantic_taxonomy import (
+    L3MVN_CATEGORY_TO_ALIASES,
+    SemanticTaxonomy,
+    _normalize_class_name,
+)
 import envs.utils.pose as pu
 
 
@@ -125,6 +129,13 @@ class EnvWrapper:
         self._replan_count: int = 0
         self._collision_n: int = 0
 
+        # Goal tracking / metrics.
+        self._goal_objects: list = []
+        self._target_object = None
+        self._path_length: float = 1e-5
+        self._starting_distance: float = 0.0
+        self._success_dist: float = float(getattr(args, "success_dist", 1.0))
+
         # Build VisionSensor via a lightweight env shim.
         self._vision_sensor = self._build_vision_sensor(igibson_env)
 
@@ -141,6 +152,7 @@ class EnvWrapper:
         info : dict
         """
         self._executor.reset()
+        self._respawn_robot()
         self._done = False
         self._clear_flag = 0
         self._step_count = 0
@@ -157,6 +169,11 @@ class EnvWrapper:
         rgb, depth, semantic = self._get_sensors()
         obs = self._obs_adapter.adapt(rgb, depth, semantic)
         self._obs = obs
+
+        self._goal_objects = self._find_goal_objects()
+        self._select_target_object()
+        self._path_length = 1e-5
+        self._starting_distance = self._distance_to_target()
 
         info = {
             "sensor_pose": [0.0, 0.0, 0.0],
@@ -213,6 +230,10 @@ class EnvWrapper:
         action = self._plan(planner_inputs)
         sensor_pose, collision = self._executor.execute(action)
 
+        # Accumulate path length for SPL.
+        dx, dy = sensor_pose[0], sensor_pose[1]
+        self._path_length += pu.get_l2_distance(0, dx, 0, dy)
+
         # Advance physics so the renderer reflects the new robot state.
         self._env.step()
 
@@ -233,9 +254,12 @@ class EnvWrapper:
         info = self._build_info(sensor_pose=sensor_pose, collision_int=collision_int)
 
         if self._done:
-            info["spl"] = 0.0
-            info["success"] = int(goal_reached)
-            info["distance_to_goal"] = 0.0
+            dist = self._distance_to_target()
+            success = int(goal_reached)
+            spl = min(self._starting_distance / self._path_length, 1.0) if success else 0.0
+            info["spl"] = spl
+            info["success"] = success
+            info["distance_to_goal"] = dist
 
         return obs, fail_case, self._done, info
 
@@ -308,6 +332,12 @@ class EnvWrapper:
             "last_action": self._last_action,
         }
 
+    def _respawn_robot(self) -> None:
+        """Teleport the robot to a new random collision-free position."""
+        from envs import _spawn_collision_free
+
+        _spawn_collision_free(self._robot, self._scene, self._env)
+
     def close(self) -> None:
         """Disconnect / close the underlying iGibson environment or simulator.
 
@@ -320,17 +350,49 @@ class EnvWrapper:
         elif hasattr(env, "close"):
             env.close()
 
+    def _find_goal_objects(self) -> list:
+        """Return all scene objects matching the current goal category."""
+        aliases = L3MVN_CATEGORY_TO_ALIASES.get(self._goal_name, ())
+        norm_aliases = {_normalize_class_name(a) for a in aliases}
+
+        matched = []
+        if not hasattr(self._scene, "objects_by_category"):
+            return matched
+        for cat_name, obj_list in self._scene.objects_by_category.items():
+            if _normalize_class_name(cat_name) in norm_aliases:
+                matched.extend(obj_list)
+        return matched
+
+    def _select_target_object(self) -> None:
+        """Fix the closest goal object as the episode target."""
+        if not self._goal_objects:
+            self._target_object = None
+            return
+        robot_pos = np.array(self._robot.get_position()[:2])
+        best, best_dist = None, float("inf")
+        for obj in self._goal_objects:
+            obj_pos = np.array(obj.get_position()[:2])
+            d = float(np.linalg.norm(robot_pos - obj_pos))
+            if d < best_dist:
+                best, best_dist = obj, d
+        self._target_object = best
+
+    def _distance_to_target(self) -> float:
+        """XY Euclidean distance from robot to the fixed target object."""
+        if self._target_object is None:
+            return float("inf")
+        robot_pos = self._robot.get_position()[:2]
+        obj_pos = self._target_object.get_position()[:2]
+        return float(pu.get_l2_distance(robot_pos[0], obj_pos[0], robot_pos[1], obj_pos[1]))
+
     def _check_goal_reached(
         self,
         semantic_id_map: np.ndarray,
         goal_cat_id: int,
         goal_name: str,
     ) -> bool:
-        """Placeholder: check whether the goal object is reached.
-
-        TODO: implement real proximity / detection logic.
-        """
-        return False
+        """Check whether the robot is within success_dist of the target object."""
+        return self._distance_to_target() < self._success_dist
 
     def _check_done(self, action: int, goal_reached: bool) -> bool:
         """Determine whether the episode is finished."""

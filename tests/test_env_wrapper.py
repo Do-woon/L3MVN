@@ -115,10 +115,16 @@ def _build_wrapper(executor=None, max_steps=500, class_id_to_name=None) -> EnvWr
     if class_id_to_name is None:
         class_id_to_name = CLASS_ID_TO_NAME
 
-    return EnvWrapper(
+    mock_robot = MagicMock()
+    mock_robot.get_position.return_value = [0.0, 0.0, 0.0]
+
+    mock_scene = MagicMock()
+    mock_scene.objects_by_category = {}
+
+    wrapper = EnvWrapper(
         igibson_env=mock_env,
-        robot=MagicMock(),
-        scene=MagicMock(),
+        robot=mock_robot,
+        scene=mock_scene,
         action_executor=executor,
         obs_adapter=ObsAdapter(),
         semantic_taxonomy=SemanticTaxonomy,
@@ -127,6 +133,9 @@ def _build_wrapper(executor=None, max_steps=500, class_id_to_name=None) -> EnvWr
         class_id_to_name=class_id_to_name,
         max_steps=max_steps,
     )
+    # Bypass pybullet-dependent respawn in unit tests.
+    wrapper._respawn_robot = lambda: None
+    return wrapper
 
 
 def _make_planner_inputs(m: int = H, *, wait: bool = False, new_goal: bool = False, found_goal: int = 0) -> dict:
